@@ -1,0 +1,123 @@
+name: Refresh Knowledge Base
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"        # Tier 1: 1st of each month, 06:00 UTC
+    - cron: "0 7 1 1,4,7,10 *" # Tier 2: quarterly (Jan/Apr/Jul/Oct), 07:00 UTC
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: "Source tier to refresh (1 or 2). Leave empty for all."
+        required: false
+        type: choice
+        options:
+          - ""
+          - "1"
+          - "2"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install crawl4ai and browser
+        run: |
+          pip install crawl4ai
+          python -m playwright install chromium
+
+      - name: Determine tier
+        id: tier
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TIER: ${{ inputs.tier }}
+        run: |
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            HOUR=$(date -u +%-H)
+            if [ "$HOUR" = "7" ]; then
+              echo "tier=2" >> "$GITHUB_OUTPUT"
+              echo "label=Tier 2 (quarterly)" >> "$GITHUB_OUTPUT"
+            else
+              echo "tier=1" >> "$GITHUB_OUTPUT"
+              echo "label=Tier 1 (monthly)" >> "$GITHUB_OUTPUT"
+            fi
+          elif [ -n "$INPUT_TIER" ]; then
+            echo "tier=$INPUT_TIER" >> "$GITHUB_OUTPUT"
+            echo "label=Tier $INPUT_TIER" >> "$GITHUB_OUTPUT"
+          else
+            echo "tier=" >> "$GITHUB_OUTPUT"
+            echo "label=All tiers" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run knowledge crawler
+        env:
+          CRAWL_TIER: ${{ steps.tier.outputs.tier }}
+        run: |
+          TIER_FLAG=""
+          if [ -n "$CRAWL_TIER" ]; then
+            TIER_FLAG="--tier $CRAWL_TIER"
+          fi
+          python scripts/crawl_docs.py $TIER_FLAG
+
+      - name: Validate crawled content
+        run: |
+          echo "Validating crawled markdown files..."
+          ERRORS=0
+          for f in $(find knowledge -name "*.md" -not -name "README.md"); do
+            SIZE=$(wc -c < "$f")
+            if [ "$SIZE" -lt 100 ]; then
+              echo "WARNING: $f is suspiciously small ($SIZE bytes)"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::warning::$ERRORS file(s) appear to have insufficient content"
+          else
+            echo "All files passed validation."
+          fi
+
+      - name: Generate diff summary
+        id: diff
+        run: |
+          SUMMARY=$(git diff --stat -- knowledge/ | tail -1)
+          if [ -z "$SUMMARY" ]; then
+            SUMMARY="No changes detected."
+          fi
+          {
+            echo "summary<<EOF"
+            echo "$SUMMARY"
+            echo ""
+            echo "Changed files:"
+            git diff --name-only -- knowledge/ || echo "  (none)"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: knowledge-refresh/${{ github.run_id }}
+          commit-message: "chore: refresh knowledge base content (${{ steps.tier.outputs.label }})"
+          title: "chore: Knowledge base refresh (${{ steps.tier.outputs.label }})"
+          body: |
+            Automated knowledge base refresh via `scripts/crawl_docs.py`.
+
+            **Scope:** ${{ steps.tier.outputs.label }}
+
+            ### Changes
+            ```
+            ${{ steps.diff.outputs.summary }}
+            ```
+
+            Please review the changes to ensure content quality before merging.
+          labels: knowledge-refresh
+          delete-branch: true

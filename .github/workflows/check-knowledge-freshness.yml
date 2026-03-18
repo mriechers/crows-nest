@@ -1,0 +1,106 @@
+name: Check Knowledge Freshness
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"  # Weekly Monday 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      threshold_days:
+        description: "Flag files older than this many days"
+        required: false
+        default: "90"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Scan knowledge files for staleness
+        id: scan
+        env:
+          THRESHOLD: ${{ inputs.threshold_days || '90' }}
+        run: |
+          NOW=$(date +%s)
+          STALE_COUNT=0
+          OLDEST_AGE=0
+          TABLE=""
+
+          while IFS= read -r -d '' file; do
+            RETRIEVED_AT=$(jq -r '.retrieved_at // empty' "$file" 2>/dev/null) || RETRIEVED_AT=""
+            [ -z "$RETRIEVED_AT" ] && continue
+
+            FILE_EPOCH=$(date -d "${RETRIEVED_AT}" +%s 2>/dev/null) || continue
+            AGE_DAYS=$(( (NOW - FILE_EPOCH) / 86400 ))
+
+            if [ "$AGE_DAYS" -gt "$THRESHOLD" ]; then
+              STALE_COUNT=$((STALE_COUNT + 1))
+              [ "$AGE_DAYS" -gt "$OLDEST_AGE" ] && OLDEST_AGE=$AGE_DAYS
+              DATE_ONLY=$(date -d "${RETRIEVED_AT}" +%Y-%m-%d)
+              TABLE="${TABLE}| \`${file}\` | ${DATE_ONLY} | ${AGE_DAYS} |\n"
+            fi
+          done < <(find knowledge -name "*.json" -not -name "sources.json" -print0)
+
+          echo "stale_count=$STALE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "oldest_age=$OLDEST_AGE" >> "$GITHUB_OUTPUT"
+          echo "threshold=$THRESHOLD" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "table<<EOF"
+            echo -e "$TABLE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Ensure label exists
+        if: steps.scan.outputs.stale_count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create knowledge-stale \
+            --description "Knowledge corpus content is stale" \
+            --color D93F0B 2>/dev/null || true
+
+      - name: Check for existing issue
+        if: steps.scan.outputs.stale_count != '0'
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT=$(gh issue list --label knowledge-stale --state open --json number --jq 'length')
+          echo "open_issues=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Create staleness issue
+        if: steps.scan.outputs.stale_count != '0' && steps.existing.outputs.open_issues == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STALE_COUNT: ${{ steps.scan.outputs.stale_count }}
+          OLDEST_AGE: ${{ steps.scan.outputs.oldest_age }}
+          THRESHOLD: ${{ steps.scan.outputs.threshold }}
+          TABLE: ${{ steps.scan.outputs.table }}
+        run: |
+          gh issue create \
+            --title "Knowledge content is stale (oldest: ${OLDEST_AGE} days)" \
+            --label "knowledge-stale" \
+            --body "## Stale Knowledge Files
+
+          ${STALE_COUNT} files haven't been refreshed in over ${THRESHOLD} days:
+
+          | File | Last Retrieved | Age (days) |
+          |------|---------------|------------|
+          ${TABLE}
+
+          ### How to refresh
+
+          Run the **Refresh Knowledge Base** workflow, or manually:
+
+          \`\`\`bash
+          pip install crawl4ai
+          python -m playwright install chromium
+          python scripts/crawl_docs.py
+          \`\`\`"

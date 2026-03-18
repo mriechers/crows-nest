@@ -1,0 +1,13 @@
+{
+  "name": "mcp-knowledge-server",
+  "deployment": "uvx",
+  "command": "uvx",
+  "args": [
+    "--from",
+    "${SERVER_DIR}",
+    "mcp-knowledge-server"
+  ],
+  "type": "stdio",
+  "notes": "Template MCP server for domain-specific knowledge bases. Fork and customize config.py for your domain.",
+  "scope": "global"
+}

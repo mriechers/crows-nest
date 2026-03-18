@@ -1,0 +1,22 @@
+[project]
+name = "mcp-knowledge-server"
+version = "0.1.0"
+description = "Template MCP server for domain-specific knowledge bases"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0",
+    "thefuzz[speedup]",
+]
+
+[project.scripts]
+mcp-knowledge-server = "mcp_knowledge.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_knowledge"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
