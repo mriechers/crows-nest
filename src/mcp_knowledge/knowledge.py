@@ -239,10 +239,10 @@ def search_knowledge(
             text = content
             if MAX_DOCUMENT_CHARS and len(text) > MAX_DOCUMENT_CHARS:
                 text = text[:MAX_DOCUMENT_CHARS] + "\n\n[truncated]"
-            results.append({"path": path, "content": text, "score": score})
+            results.append({"source": "crows-nest", "path": path, "content": text, "score": score})
         else:
             excerpt = _extract_excerpt(content, query_terms)
-            results.append({"path": path, "excerpt": excerpt, "score": score})
+            results.append({"source": "crows-nest", "path": path, "excerpt": excerpt, "score": score})
     return results
 
 

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Pre-commit hook: verify all Crow's Nest pipeline scripts have __main__ guards.
+# A missing guard causes the script to silently do nothing when launchd runs it.
+
+SCRIPTS_DIR="pipeline"
+PIPELINE_SCRIPTS=(
+    "signal_listener.py"
+    "processor.py"
+    "summarizer.py"
+    "archiver.py"
+)
+
+failed=0
+
+for script in "${PIPELINE_SCRIPTS[@]}"; do
+    path="$SCRIPTS_DIR/$script"
+    if [ -f "$path" ] && ! grep -q 'if __name__' "$path"; then
+        echo "pre-commit: FAIL — $script is missing 'if __name__ == \"__main__\"' guard"
+        echo "  Without this, launchd will run the script and it will silently exit."
+        failed=1
+    fi
+done
+
+if [ $failed -ne 0 ]; then
+    echo ""
+    echo "Commit blocked. Add a __main__ guard to the script(s) above."
+    exit 1
+fi
