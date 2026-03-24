@@ -30,7 +30,7 @@ CROWS_NEST_HOME = os.environ.get(
 
 OBSIDIAN_VAULT = os.environ.get(
     "OBSIDIAN_VAULT",
-    os.path.expanduser("~/Developer/obsidian/MarkBrain"),
+    os.path.expanduser("~/Developer/second-brain/obsidian/MarkBrain"),
 )
 
 MEDIA_ROOT = os.environ.get(
@@ -51,7 +51,7 @@ DB_PATH = os.path.join(DATA_DIR, "crows-nest.db")
 MESSAGE_LOG = os.path.join(LOG_DIR, "signal-messages.log")
 WHISPER_SCRIPT = os.path.join(SCRIPTS_DIR, "whisper-transcribe.sh")
 
-OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "0 - INBOX", "Clippings")
+OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "0 - INBOX", "CLIPPINGS")
 OBSIDIAN_ARCHIVE = os.path.join(OBSIDIAN_VAULT, "4 - ARCHIVE")
 
 
