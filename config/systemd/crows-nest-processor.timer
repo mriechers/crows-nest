@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Crow's Nest Processor every 30 minutes
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

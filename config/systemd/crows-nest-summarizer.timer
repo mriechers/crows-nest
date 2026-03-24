@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Crow's Nest Summarizer every 2 hours
+
+[Timer]
+OnBootSec=180
+OnUnitActiveSec=7200
+Persistent=true
+
+[Install]
+WantedBy=timers.target

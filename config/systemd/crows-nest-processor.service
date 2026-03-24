@@ -1,0 +1,15 @@
+[Unit]
+Description=Crow's Nest Processor — download media, transcribe, scrape articles
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/crows-nest/.venv/bin/python /opt/crows-nest/pipeline/processor.py
+WorkingDirectory=/opt/crows-nest/pipeline
+Environment=CROWS_NEST_HOME=/opt/crows-nest
+Environment=OBSIDIAN_VAULT=/data/obsidian/MarkBrain
+Environment=MEDIA_ROOT=/data/media/crows-nest
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

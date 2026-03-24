@@ -1,7 +1,7 @@
 [project]
-name = "mcp-knowledge-server"
+name = "crows-nest"
 version = "0.1.0"
-description = "Template MCP server for domain-specific knowledge bases"
+description = "MCP knowledge server and Signal-to-Obsidian content preservation pipeline"
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.0",

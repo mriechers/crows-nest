@@ -1,0 +1,15 @@
+[Unit]
+Description=Crow's Nest Summarizer — generate Obsidian notes from transcribed content
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/crows-nest/.venv/bin/python /opt/crows-nest/pipeline/summarizer.py
+WorkingDirectory=/opt/crows-nest/pipeline
+Environment=CROWS_NEST_HOME=/opt/crows-nest
+Environment=OBSIDIAN_VAULT=/data/obsidian/MarkBrain
+Environment=MEDIA_ROOT=/data/media/crows-nest
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
