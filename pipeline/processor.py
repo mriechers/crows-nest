@@ -9,6 +9,9 @@ import json
 import os
 import re
 import subprocess
+import urllib.request
+import urllib.error
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 from config import WHISPER_SCRIPT, OBSIDIAN_ARCHIVE, convert_heic_to_jpeg, resize_image
@@ -203,6 +206,357 @@ def process_web_page(
 # Video handler
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Podcast transcript fetching via RSS
+# ---------------------------------------------------------------------------
+
+def _resolve_rss_feed(url: str) -> str | None:
+    """Resolve a podcast platform URL to its RSS feed URL.
+
+    Supports Apple Podcasts (via lookup API) and Overcast (page scraping).
+    Returns the feed URL or None.
+    """
+    parsed = urllib.parse.urlparse(url)
+    domain = parsed.hostname or ""
+
+    # Apple Podcasts: extract podcast ID, hit lookup API
+    if "podcasts.apple.com" in domain:
+        # URL format: /us/podcast/show-name/id1234567890?i=episodeId
+        id_match = re.search(r'/id(\d+)', parsed.path)
+        if id_match:
+            podcast_id = id_match.group(1)
+            try:
+                lookup_url = f"https://itunes.apple.com/lookup?id={podcast_id}&entity=podcast"
+                req = urllib.request.Request(lookup_url, headers={
+                    "User-Agent": "CrowsNest/1.0",
+                })
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                results = data.get("results", [])
+                if results:
+                    feed_url = results[0].get("feedUrl")
+                    if feed_url:
+                        logger.info("resolved Apple Podcasts -> RSS: %s", feed_url)
+                        return feed_url
+            except Exception as exc:
+                logger.debug("Apple lookup failed: %s", exc)
+
+    # Overcast: page contains RSS feed link
+    if "overcast.fm" in domain:
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "CrowsNest/1.0",
+            })
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+            feed_match = re.search(
+                r'href=["\']([^"\']+)["\'][^>]*type=["\']application/rss\+xml["\']',
+                html,
+            )
+            if not feed_match:
+                feed_match = re.search(
+                    r'type=["\']application/rss\+xml["\'][^>]*href=["\']([^"\']+)["\']',
+                    html,
+                )
+            if feed_match:
+                logger.info("resolved Overcast -> RSS: %s", feed_match.group(1))
+                return feed_match.group(1)
+        except Exception as exc:
+            logger.debug("Overcast scrape failed: %s", exc)
+
+    return None
+
+
+def _extract_apple_episode_id(url: str) -> str | None:
+    """Extract the episode ID from an Apple Podcasts URL."""
+    parsed = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(parsed.query)
+    episode_ids = qs.get("i", [])
+    return episode_ids[0] if episode_ids else None
+
+
+def _match_episode_in_feed(feed_xml: str, url: str, yt_metadata: dict) -> dict | None:
+    """Find the matching episode in an RSS feed.
+
+    Matches by Apple episode ID (embedded in the enclosure URL's GUID),
+    episode title, or enclosure URL.  Returns a dict with 'title',
+    'transcript_url', 'transcript_type', and 'description' if found.
+    """
+    apple_episode_id = _extract_apple_episode_id(url)
+    target_title = (yt_metadata.get("title") or "").lower().strip()
+
+    # Split feed into items
+    items = re.findall(r"<item>(.*?)</item>", feed_xml, re.DOTALL)
+
+    for item_xml in items:
+        # Check for podcast:transcript tag
+        transcript_match = re.search(
+            r'<podcast:transcript\s+url=["\']([^"\']+)["\']'
+            r'\s+type=["\']([^"\']+)["\']',
+            item_xml,
+        )
+        if not transcript_match:
+            continue
+
+        # This episode has a transcript — check if it's the right one
+        matched = False
+
+        # Match by Apple episode ID in GUID or enclosure URL
+        if apple_episode_id:
+            if apple_episode_id in item_xml:
+                matched = True
+
+        # Match by title
+        if not matched and target_title:
+            title_match = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item_xml)
+            if title_match:
+                feed_title = title_match.group(1).strip().lower()
+                # Fuzzy: check if either contains the other
+                if (target_title in feed_title
+                        or feed_title in target_title
+                        or _title_similarity(target_title, feed_title) > 0.6):
+                    matched = True
+
+        if matched:
+            title_match = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item_xml)
+            return {
+                "title": title_match.group(1).strip() if title_match else "",
+                "transcript_url": transcript_match.group(1),
+                "transcript_type": transcript_match.group(2),
+            }
+
+    return None
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Simple word-overlap similarity between two titles."""
+    words_a = set(a.lower().split())
+    words_b = set(b.lower().split())
+    if not words_a or not words_b:
+        return 0.0
+    overlap = words_a & words_b
+    return len(overlap) / max(len(words_a), len(words_b))
+
+
+def _download_transcript(transcript_url: str, transcript_type: str,
+                         media_dir: str) -> str | None:
+    """Download and convert a podcast transcript to plain text.
+
+    Supports VTT, SRT, HTML, and plain text formats.
+    Returns path to the transcript .txt file, or None on failure.
+    """
+    try:
+        req = urllib.request.Request(transcript_url, headers={
+            "User-Agent": "CrowsNest/1.0",
+        })
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            content = resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        logger.warning("transcript download failed: %s", exc)
+        return None
+
+    if len(content) < 50:
+        logger.info("transcript too short (%d chars), skipping", len(content))
+        return None
+
+    # Convert based on format
+    if "vtt" in transcript_type:
+        # Save VTT then convert with existing function
+        vtt_path = os.path.join(media_dir, "transcript.vtt")
+        with open(vtt_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        text = _vtt_to_text(vtt_path)
+    elif "srt" in transcript_type:
+        text = _srt_to_text(content)
+    elif "html" in transcript_type:
+        text = _html_to_text(content)
+    else:
+        # Assume plain text
+        text = content
+
+    if len(text) < 50:
+        return None
+
+    transcript_path = os.path.join(media_dir, "transcript.txt")
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    return transcript_path
+
+
+def _srt_to_text(content: str) -> str:
+    """Convert SRT subtitle content to plain text."""
+    lines = []
+    seen = set()
+    for line in content.splitlines():
+        # Skip sequence numbers, timestamps, blank lines
+        if (not line.strip()
+                or re.match(r"^\d+$", line.strip())
+                or re.match(r"^\d{2}:\d{2}:\d{2}", line.strip())):
+            continue
+        clean = re.sub(r"<[^>]+>", "", line).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            lines.append(clean)
+    return "\n".join(lines)
+
+
+def _html_to_text(content: str) -> str:
+    """Convert HTML transcript to plain text."""
+    # Remove script/style blocks
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", content, flags=re.DOTALL)
+    # Convert <br>, <p>, <div> to newlines
+    text = re.sub(r"<br\s*/?>", "\n", text)
+    text = re.sub(r"</?(p|div|h[1-6])[^>]*>", "\n", text)
+    # Strip remaining tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Clean up whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # Decode entities
+    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
+    return text.strip()
+
+
+def _try_fetch_podcast_transcript(
+    url: str, media_dir: str, link_id: int, yt_metadata: dict,
+) -> str | None:
+    """Try to find and download a podcast transcript via RSS feed.
+
+    Resolves the podcast URL to an RSS feed, searches for a
+    <podcast:transcript> tag on the matching episode, downloads
+    and converts the transcript.
+
+    Returns path to transcript .txt file, or None.
+    """
+    feed_url = _resolve_rss_feed(url)
+    if not feed_url:
+        logger.info("link %d: could not resolve RSS feed for %s", link_id, url)
+        return None
+
+    # Fetch the RSS feed
+    try:
+        req = urllib.request.Request(feed_url, headers={
+            "User-Agent": "CrowsNest/1.0",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            feed_xml = resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        logger.warning("link %d: RSS feed fetch failed: %s", link_id, exc)
+        return None
+
+    # Find the matching episode
+    episode = _match_episode_in_feed(feed_xml, url, yt_metadata)
+    if not episode:
+        logger.info("link %d: no transcript tag in RSS feed for this episode", link_id)
+        return None
+
+    logger.info("link %d: found RSS transcript (%s) for '%s'",
+                link_id, episode["transcript_type"], episode["title"])
+
+    # Download and convert the transcript
+    return _download_transcript(
+        episode["transcript_url"], episode["transcript_type"], media_dir,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Subtitle fetching (YouTube, social video)
+# ---------------------------------------------------------------------------
+
+def _vtt_to_text(vtt_path: str) -> str:
+    """Convert a VTT subtitle file to plain text.
+
+    Strips timestamps, positioning metadata, and deduplicates overlapping
+    caption lines.  Preserves speaker labels (e.g. "Narrator:").
+    """
+    with open(vtt_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    lines = []
+    seen = set()
+    for line in content.splitlines():
+        # Skip VTT header, blank lines, timestamps, and positioning
+        if (not line.strip()
+                or line.startswith("WEBVTT")
+                or line.startswith("Kind:")
+                or line.startswith("Language:")
+                or re.match(r"^\d{2}:\d{2}:\d{2}", line)
+                or line.startswith("NOTE")):
+            continue
+
+        # Strip HTML tags (some VTT files use <c> color tags)
+        clean = re.sub(r"<[^>]+>", "", line).strip()
+        if not clean:
+            continue
+
+        # Deduplicate — VTT cues often repeat text across overlapping windows
+        if clean not in seen:
+            seen.add(clean)
+            lines.append(clean)
+
+    return "\n".join(lines)
+
+
+def _try_fetch_subtitles(url: str, media_dir: str, link_id: int) -> str | None:
+    """Try to download existing subtitles for a video via yt-dlp.
+
+    Checks for uploaded captions first (higher quality), then falls back
+    to auto-generated captions.  Returns the path to a plain-text
+    transcript file, or None if no subtitles are available.
+    """
+    vtt_output = os.path.join(media_dir, "%(title)s.%(ext)s")
+
+    # Try uploaded captions first — human-authored, better quality
+    result = subprocess.run(
+        [
+            "yt-dlp", "--write-sub", "--sub-lang", "en",
+            "--skip-download", "--sub-format", "vtt",
+            "--output", vtt_output, url,
+        ],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    # Check if a .vtt file was written
+    vtt_path = None
+    for name in os.listdir(media_dir):
+        if name.endswith(".en.vtt"):
+            vtt_path = os.path.join(media_dir, name)
+            break
+
+    # If no uploaded captions, try auto-generated
+    if not vtt_path:
+        result = subprocess.run(
+            [
+                "yt-dlp", "--write-auto-sub", "--sub-lang", "en",
+                "--skip-download", "--sub-format", "vtt",
+                "--output", vtt_output, url,
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+        for name in os.listdir(media_dir):
+            if name.endswith(".en.vtt"):
+                vtt_path = os.path.join(media_dir, name)
+                break
+
+    if not vtt_path:
+        return None
+
+    # Convert VTT to plain text
+    text = _vtt_to_text(vtt_path)
+    if len(text) < 50:
+        logger.info("link %d: subtitles too short (%d chars), will use Whisper", link_id, len(text))
+        return None
+
+    # Write plain text transcript
+    transcript_path = os.path.join(media_dir, "transcript.txt")
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    logger.info("link %d: fetched subtitles (%d chars) — skipping Whisper", link_id, len(text))
+    return transcript_path
+
+
 def process_video(
     link_id: int,
     url: str,
@@ -211,7 +565,11 @@ def process_video(
     context: str,
     db_path: str,
 ) -> None:
-    """Download video with yt-dlp, transcribe with Whisper."""
+    """Download video with yt-dlp, transcribe with subtitles or Whisper.
+
+    Tries to fetch existing subtitles (uploaded, then auto-generated)
+    before falling back to audio download + Whisper transcription.
+    """
     logger.info("link %d: downloading video from %s", link_id, url)
 
     # Step 1: Fetch rich metadata before downloading
@@ -226,33 +584,56 @@ def process_video(
     except (subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
         logger.warning("link %d: metadata fetch failed (non-fatal): %s", link_id, exc)
 
-    # Step 2: Download audio track only — faster + whisper only needs audio
-    result = subprocess.run(
-        [
-            "yt-dlp",
-            "--extract-audio",
-            "--audio-format", "m4a",
-            "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
-            url,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"yt-dlp failed: {result.stderr[:500]}")
+    # Step 2: Try to fetch a transcript (cheapest sources first)
+    transcript_path = None
 
-    # Find the downloaded audio file
+    # 2a: Podcast RSS transcript tag (fastest — direct download)
+    if content_type == "podcast":
+        try:
+            transcript_path = _try_fetch_podcast_transcript(
+                url, media_dir, link_id, yt_metadata,
+            )
+        except Exception as exc:
+            logger.info("link %d: podcast transcript fetch failed (non-fatal): %s", link_id, exc)
+
+    # 2b: yt-dlp subtitles (uploaded captions, then auto-generated)
+    if not transcript_path:
+        try:
+            transcript_path = _try_fetch_subtitles(url, media_dir, link_id)
+        except Exception as exc:
+            logger.info("link %d: subtitle fetch failed (non-fatal): %s", link_id, exc)
+
+    # Step 3: Download audio only if we need Whisper
     audio_file = None
-    for name in os.listdir(media_dir):
-        if name.endswith((".m4a", ".mp3", ".wav", ".opus", ".webm")):
-            audio_file = os.path.join(media_dir, name)
-            break
+    if not transcript_path:
+        result = subprocess.run(
+            [
+                "yt-dlp",
+                "--extract-audio",
+                "--audio-format", "m4a",
+                "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
+                url,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"yt-dlp failed: {result.stderr[:500]}")
 
-    if not audio_file:
-        raise RuntimeError("yt-dlp succeeded but no audio file found in media_dir")
+        for name in os.listdir(media_dir):
+            if name.endswith((".m4a", ".mp3", ".wav", ".opus", ".webm")):
+                audio_file = os.path.join(media_dir, name)
+                break
 
-    # Derive video title from the downloaded filename (yt-dlp names it after the title)
-    video_title = os.path.splitext(os.path.basename(audio_file))[0]
+        if not audio_file:
+            raise RuntimeError("yt-dlp succeeded but no audio file found in media_dir")
+
+    # Derive video title from downloaded file or metadata
+    video_title = ""
+    if audio_file:
+        video_title = os.path.splitext(os.path.basename(audio_file))[0]
+    elif yt_metadata.get("title"):
+        video_title = yt_metadata["title"]
 
     # Detect platform from URL domain
     from urllib.parse import urlparse
@@ -293,21 +674,22 @@ def process_video(
         json.dump(metadata, f, indent=2)
 
     update_status(link_id=link_id, status="downloading",
-                  download_path=audio_file, db_path=db_path)
+                  download_path=audio_file or "", db_path=db_path)
 
-    # Transcribe
-    prompt_arg = context if context else ""
-    whisper_cmd = [WHISPER_SCRIPT, audio_file]
-    if prompt_arg:
-        whisper_cmd = [WHISPER_SCRIPT, "--prompt", prompt_arg, audio_file]
-
-    result = subprocess.run(whisper_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"whisper-transcribe failed: {result.stderr[:500]}")
-
-    transcript_path = _find_transcript(media_dir)
+    # Step 4: Transcribe with Whisper if no subtitles were found
     if not transcript_path:
-        raise RuntimeError("Whisper ran but no .txt transcript found in media_dir tree")
+        prompt_arg = context if context else ""
+        whisper_cmd = [WHISPER_SCRIPT, audio_file]
+        if prompt_arg:
+            whisper_cmd = [WHISPER_SCRIPT, "--prompt", prompt_arg, audio_file]
+
+        result = subprocess.run(whisper_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"whisper-transcribe failed: {result.stderr[:500]}")
+
+        transcript_path = _find_transcript(media_dir)
+        if not transcript_path:
+            raise RuntimeError("Whisper ran but no .txt transcript found in media_dir tree")
 
     update_status(
         link_id=link_id,
@@ -438,11 +820,14 @@ def run(db_path: str) -> None:
                 mdir = media_dir_for(title)
                 process_web_page(link_id, url, content, title, mdir, db_path)
 
-            elif content_type in ("youtube", "social_video"):
+            elif content_type in ("youtube", "social_video", "podcast"):
+                # Podcasts use yt-dlp too — it handles Apple Podcasts,
+                # Spotify, and other platform pages.  Direct audio URLs
+                # are classified as "audio" instead.
                 mdir = media_dir_for(sanitize_title(url))
                 process_video(link_id, url, content_type, mdir, context, db_path)
 
-            elif content_type in ("audio", "podcast"):
+            elif content_type == "audio":
                 mdir = media_dir_for(sanitize_title(url))
                 process_audio(link_id, url, mdir, context, db_path)
 

@@ -1,6 +1,7 @@
 """URL content-type classifier for the Crow's Nest pipeline."""
 
 import os
+import re
 from urllib.parse import urlparse
 
 _YOUTUBE_DOMAINS = {
@@ -65,9 +66,11 @@ def classify_url(url: str) -> str:
     if domain in _SOCIAL_VIDEO_DOMAINS:
         return "social_video"
 
-    # Strip query string before checking extension — urlparse already gives us
-    # just the path, but the extension check needs to ignore query params.
-    _, ext = os.path.splitext(path)
+    # Check for audio file extensions — strip anything after the extension
+    # that looks like query/tracking params (& or ? delimited).
+    # Some URLs use & instead of ? for params (e.g. .mp3&_gl=tracking...)
+    clean_path = re.split(r'[?&]', path)[0]
+    _, ext = os.path.splitext(clean_path)
     if ext in _AUDIO_EXTENSIONS:
         return "audio"
 

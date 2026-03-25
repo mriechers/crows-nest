@@ -66,6 +66,13 @@ def test_web_page_docs():
     assert classify_url("https://docs.python.org/3/library/urllib.parse.html") == "web_page"
 
 
+def test_audio_mp3_with_tracking_params():
+    # .mp3 followed by & tracking params should still classify as audio
+    assert classify_url(
+        "https://wpr-podcast.streamguys1.com/iwp/iwp260319.mp3&_gl=1*13f7fr8"
+    ) == "audio"
+
+
 def test_edge_case_m_youtube():
     # Mobile YouTube subdomain should classify as youtube
     assert classify_url("https://m.youtube.com/watch?v=abc123") == "youtube"

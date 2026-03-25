@@ -54,6 +54,24 @@ def test_extract_urls_with_punctuation():
     assert urls == ["https://example.com"]
 
 
+def test_extract_urls_preserves_query_params():
+    text = "Watch https://youtube.com/watch?v=ZTKB5-t_7CQ&feature=youtu.be now"
+    urls = utils.extract_urls(text)
+    assert urls == ["https://youtube.com/watch?v=ZTKB5-t_7CQ&feature=youtu.be"]
+
+
+def test_extract_urls_strips_trailing_question_mark():
+    text = "Is this a link? https://example.com/page? I think so."
+    urls = utils.extract_urls(text)
+    assert urls == ["https://example.com/page"]
+
+
+def test_extract_urls_podcast_with_episode_id():
+    text = "https://podcasts.apple.com/us/podcast/hard-fork/id1528594034?i=1000755082467"
+    urls = utils.extract_urls(text)
+    assert urls == ["https://podcasts.apple.com/us/podcast/hard-fork/id1528594034?i=1000755082467"]
+
+
 def test_media_dir_for(monkeypatch, tmp_path):
     monkeypatch.setattr(utils, "MEDIA_ROOT", str(tmp_path))
     path = utils.media_dir_for("My Cool Title")
