@@ -239,7 +239,7 @@ def _resolve_rss_feed(url: str) -> str | None:
                         logger.info("resolved Apple Podcasts -> RSS: %s", feed_url)
                         return feed_url
             except Exception as exc:
-                logger.debug("Apple lookup failed: %s", exc)
+                logger.warning("Apple Podcasts lookup failed (non-fatal): %s", exc)
 
     # Overcast: page contains RSS feed link
     if "overcast.fm" in domain:
@@ -262,7 +262,7 @@ def _resolve_rss_feed(url: str) -> str | None:
                 logger.info("resolved Overcast -> RSS: %s", feed_match.group(1))
                 return feed_match.group(1)
         except Exception as exc:
-            logger.debug("Overcast scrape failed: %s", exc)
+            logger.warning("Overcast scrape failed (non-fatal): %s", exc)
 
     return None
 
@@ -508,14 +508,20 @@ def _try_fetch_subtitles(url: str, media_dir: str, link_id: int) -> str | None:
     vtt_output = os.path.join(media_dir, "%(title)s.%(ext)s")
 
     # Try uploaded captions first — human-authored, better quality
-    result = subprocess.run(
-        [
-            "yt-dlp", "--write-sub", "--sub-lang", "en",
-            "--skip-download", "--sub-format", "vtt",
-            "--output", vtt_output, url,
-        ],
-        capture_output=True, text=True, timeout=60,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "yt-dlp", "--write-sub", "--sub-lang", "en",
+                "--skip-download", "--sub-format", "vtt",
+                "--output", vtt_output, url,
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            logger.info("link %d: no uploaded captions (yt-dlp: %s)",
+                        link_id, result.stderr.strip()[:200] or "no subtitles")
+    except subprocess.TimeoutExpired:
+        logger.warning("link %d: yt-dlp subtitle fetch timed out", link_id)
 
     # Check if a .vtt file was written
     vtt_path = None
@@ -526,14 +532,21 @@ def _try_fetch_subtitles(url: str, media_dir: str, link_id: int) -> str | None:
 
     # If no uploaded captions, try auto-generated
     if not vtt_path:
-        result = subprocess.run(
-            [
-                "yt-dlp", "--write-auto-sub", "--sub-lang", "en",
-                "--skip-download", "--sub-format", "vtt",
-                "--output", vtt_output, url,
-            ],
-            capture_output=True, text=True, timeout=60,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "yt-dlp", "--write-auto-sub", "--sub-lang", "en",
+                    "--skip-download", "--sub-format", "vtt",
+                    "--output", vtt_output, url,
+                ],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode != 0:
+                logger.info("link %d: no auto-captions (yt-dlp: %s)",
+                            link_id, result.stderr.strip()[:200] or "no subtitles")
+        except subprocess.TimeoutExpired:
+            logger.warning("link %d: yt-dlp auto-caption fetch timed out", link_id)
+
         for name in os.listdir(media_dir):
             if name.endswith(".en.vtt"):
                 vtt_path = os.path.join(media_dir, name)

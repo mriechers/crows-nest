@@ -642,7 +642,7 @@ def enrich_with_creator_search(
 
     except Exception as exc:
         # Enrichment is best-effort — never block the pipeline
-        logger.debug("enrichment search failed: %s", exc)
+        logger.warning("enrichment search failed (non-fatal): %s", exc)
 
     return claude_result
 
@@ -714,7 +714,7 @@ def _refine_title_with_enrichment(claude_result: dict) -> dict:
             logger.debug("title unchanged after refinement")
 
     except Exception as exc:
-        logger.debug("title refinement failed: %s", exc)
+        logger.warning("title refinement failed (non-fatal): %s", exc)
 
     return claude_result
 

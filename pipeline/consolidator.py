@@ -508,11 +508,14 @@ def generate_roundup_note(cluster: dict) -> tuple[str, str]:
 # 1f. Append to existing roundup
 # ---------------------------------------------------------------------------
 
-def _append_to_roundup(roundup_path: str, cluster: dict) -> None:
+def _append_to_roundup(roundup_path: str, cluster: dict) -> bool:
     """Append new notes to an existing category roundup note.
 
     Updates the source-count in frontmatter and appends entries to the
     "What's Covered" and "Source Notes" sections.
+
+    Returns True if all new notes were successfully inserted, False if
+    any section was missing or insertion could not be verified.
     """
     with open(roundup_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -526,7 +529,7 @@ def _append_to_roundup(roundup_path: str, cluster: dict) -> None:
     ]
     if not new_notes:
         logger.info("all notes already in roundup, nothing to append")
-        return
+        return True
 
     # Update source-count in frontmatter
     count_match = re.search(r'^source-count:\s*(\d+)$', content, re.MULTILINE)
@@ -550,26 +553,52 @@ def _append_to_roundup(roundup_path: str, cluster: dict) -> None:
         else:
             covered_entries.append(f"- **[[{name}]]**")
 
-    # Insert before the next ## heading after "## What's Covered"
-    covered_pattern = r'(## What\'s Covered\n\n(?:.*\n)*?)((?=\n##)|\Z)'
-    covered_match = re.search(covered_pattern, content)
-    if covered_match:
-        insert_pos = covered_match.end(1)
+    # Find the end of the "## What's Covered" section content
+    # by looking for the next heading or end of file
+    covered_header = re.search(r'^## What\'s Covered\s*\n', content, re.MULTILINE)
+    if covered_header:
+        # Find the next ## heading after this one
+        next_heading = re.search(r'^\n##\s', content[covered_header.end():], re.MULTILINE)
+        if next_heading:
+            insert_pos = covered_header.end() + next_heading.start()
+        else:
+            # Section is at end of file — insert before final newline
+            insert_pos = len(content.rstrip()) + 1
         new_covered = "\n".join(covered_entries) + "\n"
         content = content[:insert_pos] + new_covered + content[insert_pos:]
+    else:
+        logger.warning("could not find '## What's Covered' section in %s, entries not appended",
+                       roundup_path)
+        return False
 
     # Append to "## Source Notes" section
     source_entries = "\n".join(f"- [[{_note_name(n)}]]" for n in new_notes)
-    source_pattern = r'(## Source Notes\n\n(?:.*\n)*?)((?=\n##)|\Z)'
-    source_match = re.search(source_pattern, content)
-    if source_match:
-        insert_pos = source_match.end(1)
+    source_header = re.search(r'^## Source Notes\s*\n', content, re.MULTILINE)
+    if source_header:
+        next_heading = re.search(r'^\n##\s', content[source_header.end():], re.MULTILINE)
+        if next_heading:
+            insert_pos = source_header.end() + next_heading.start()
+        else:
+            insert_pos = len(content.rstrip()) + 1
         content = content[:insert_pos] + source_entries + "\n" + content[insert_pos:]
+    else:
+        logger.warning("could not find '## Source Notes' section in %s, entries not appended",
+                       roundup_path)
+        return False
+
+    # Verify all new wikilinks are present before writing
+    for note in new_notes:
+        name = _note_name(note)
+        if f"[[{name}]]" not in content:
+            logger.warning("verification failed: [[%s]] not found in modified content, aborting write",
+                           name)
+            return False
 
     with open(roundup_path, "w", encoding="utf-8") as f:
         f.write(content)
 
     logger.info("appended %d note(s) to %s", len(new_notes), roundup_path)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -592,30 +621,36 @@ def archive_clippings(cluster: dict, roundup_title: str) -> list[str]:
             logger.warning("skipping missing file: %s", filepath)
             continue
 
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                original_content = f.read()
 
-        # Update para: inbox -> para: archive
-        content = re.sub(r'^para:\s*inbox$', 'para: archive', content, flags=re.MULTILINE)
+            content = original_content
 
-        # Insert consolidated-into after the para: line
-        safe_roundup = roundup_title.replace('"', '\\"')
-        content = re.sub(
-            r'^(para:\s*archive)$',
-            rf'\1\nconsolidated-into: "[[{safe_roundup}]]"',
-            content,
-            flags=re.MULTILINE,
-        )
+            # Update para: inbox -> para: archive
+            content = re.sub(r'^para:\s*inbox$', 'para: archive', content, flags=re.MULTILINE)
 
-        # Write updated content back before moving
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
+            # Insert consolidated-into after the para: line
+            safe_roundup = roundup_title.replace('"', '\\"')
+            content = re.sub(
+                r'^(para:\s*archive)$',
+                lambda m: f'{m.group(1)}\nconsolidated-into: "[[{safe_roundup}]]"',
+                content,
+                flags=re.MULTILINE,
+            )
 
-        # Move to archive
-        dest = os.path.join(archive_dir, os.path.basename(filepath))
-        shutil.move(filepath, dest)
-        moved.append(dest)
-        logger.info("archived: %s -> %s", os.path.basename(filepath), dest)
+            # Move to archive first, then update content at destination
+            dest = os.path.join(archive_dir, os.path.basename(filepath))
+            shutil.move(filepath, dest)
+
+            with open(dest, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            moved.append(dest)
+            logger.info("archived: %s -> %s", os.path.basename(filepath), dest)
+
+        except Exception as exc:
+            logger.error("failed to archive %s: %s", os.path.basename(filepath), exc)
 
     return moved
 
@@ -682,7 +717,10 @@ def execute_workflow(
 
         if is_category and os.path.exists(note_path):
             # Append new notes to existing roundup
-            _append_to_roundup(note_path, cluster)
+            success = _append_to_roundup(note_path, cluster)
+            if not success:
+                print(f"\nWARNING: Failed to append to {note_path} — originals NOT archived")
+                continue
             print(f"\nAppended {len(cluster['notes'])} note(s) to existing roundup: {note_path}")
         else:
             # Generate new roundup note
@@ -700,7 +738,7 @@ def execute_workflow(
                 f.write(note_content)
             print(f"\nCreated roundup: {note_path}")
 
-        # Archive originals — use sanitized filename for wikilink
+        # Archive originals — only after roundup was successfully created/updated
         archived = archive_clippings(cluster, safe_filename)
         print(f"  Archived {len(archived)} original note(s)")
 
