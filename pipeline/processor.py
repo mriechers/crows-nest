@@ -210,10 +210,86 @@ def process_web_page(
 # Podcast transcript fetching via RSS
 # ---------------------------------------------------------------------------
 
+def _apple_lookup_by_id(podcast_id: str) -> str | None:
+    """Look up an RSS feed URL via the iTunes API using a podcast ID."""
+    try:
+        lookup_url = f"https://itunes.apple.com/lookup?id={podcast_id}&entity=podcast"
+        req = urllib.request.Request(lookup_url, headers={
+            "User-Agent": "CrowsNest/1.0",
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        results = data.get("results", [])
+        if results:
+            return results[0].get("feedUrl")
+    except Exception as exc:
+        logger.warning("Apple Podcasts lookup failed (non-fatal): %s", exc)
+    return None
+
+
+def _apple_lookup_by_name(show_name: str) -> str | None:
+    """Search the iTunes API for a podcast by name, return RSS feed URL."""
+    try:
+        encoded = urllib.parse.quote_plus(show_name)
+        search_url = f"https://itunes.apple.com/search?term={encoded}&entity=podcast&limit=3"
+        req = urllib.request.Request(search_url, headers={
+            "User-Agent": "CrowsNest/1.0",
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        results = data.get("results", [])
+        # Pick the best match by name similarity
+        for result in results:
+            name = result.get("collectionName", "").lower()
+            if _title_similarity(show_name.lower(), name) > 0.5:
+                feed_url = result.get("feedUrl")
+                if feed_url:
+                    return feed_url
+        # Fall back to first result if any
+        if results and results[0].get("feedUrl"):
+            return results[0]["feedUrl"]
+    except Exception as exc:
+        logger.warning("Apple Podcasts name search failed (non-fatal): %s", exc)
+    return None
+
+
+def _extract_rss_from_html(html: str) -> str | None:
+    """Find an RSS feed link in an HTML page's <head>."""
+    # Match <link rel="alternate" type="application/rss+xml" href="...">
+    # Attributes can appear in any order
+    for pattern in [
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+type=["\']application/rss\+xml["\']',
+        r'<link[^>]+type=["\']application/rss\+xml["\'][^>]+href=["\']([^"\']+)["\']',
+    ]:
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _fetch_page(url: str) -> str | None:
+    """Fetch a web page and return its HTML. Returns None on failure."""
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "CrowsNest/1.0 (content-pipeline)",
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception as exc:
+        logger.warning("page fetch failed for %s: %s", url, exc)
+        return None
+
+
 def _resolve_rss_feed(url: str) -> str | None:
     """Resolve a podcast platform URL to its RSS feed URL.
 
-    Supports Apple Podcasts (via lookup API) and Overcast (page scraping).
+    Supports:
+    - Apple Podcasts (via iTunes lookup API)
+    - Spotify (scrape page for show name → Apple lookup)
+    - Overcast (page scraping for RSS link)
+    - Any web page with a <link type="application/rss+xml"> tag
+      or Schema.org PodcastEpisode markup
+
     Returns the feed URL or None.
     """
     parsed = urllib.parse.urlparse(url)
@@ -221,48 +297,91 @@ def _resolve_rss_feed(url: str) -> str | None:
 
     # Apple Podcasts: extract podcast ID, hit lookup API
     if "podcasts.apple.com" in domain:
-        # URL format: /us/podcast/show-name/id1234567890?i=episodeId
         id_match = re.search(r'/id(\d+)', parsed.path)
         if id_match:
-            podcast_id = id_match.group(1)
-            try:
-                lookup_url = f"https://itunes.apple.com/lookup?id={podcast_id}&entity=podcast"
-                req = urllib.request.Request(lookup_url, headers={
-                    "User-Agent": "CrowsNest/1.0",
-                })
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                results = data.get("results", [])
-                if results:
-                    feed_url = results[0].get("feedUrl")
-                    if feed_url:
-                        logger.info("resolved Apple Podcasts -> RSS: %s", feed_url)
-                        return feed_url
-            except Exception as exc:
-                logger.warning("Apple Podcasts lookup failed (non-fatal): %s", exc)
+            feed_url = _apple_lookup_by_id(id_match.group(1))
+            if feed_url:
+                logger.info("resolved Apple Podcasts -> RSS: %s", feed_url)
+                return feed_url
+
+    # Spotify: scrape the page for the show name, search Apple for the RSS feed
+    if "open.spotify.com" in domain and "/episode/" in parsed.path:
+        html = _fetch_page(url)
+        if html:
+            show_name = None
+
+            # Try <title> tag first — format: "Episode - Show | Podcast on Spotify"
+            title_match = re.search(r"<title>([^<]+)</title>", html)
+            if title_match:
+                page_title = title_match.group(1).strip()
+                # Strip the " | Podcast on Spotify" suffix
+                page_title = re.sub(r'\s*\|\s*Podcast on Spotify\s*$', '', page_title)
+                # Split on " - " to get "Episode - Show"
+                if " - " in page_title:
+                    parts = page_title.rsplit(" - ", 1)
+                    candidate = parts[-1].strip()
+                    if candidate and candidate.lower() not in ("spotify", "podcast"):
+                        show_name = candidate
+
+            # Fallback: try og:title (sometimes has "Episode - Show")
+            if not show_name:
+                og_match = re.search(
+                    r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+                    html, re.IGNORECASE,
+                )
+                if not og_match:
+                    og_match = re.search(
+                        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']',
+                        html, re.IGNORECASE,
+                    )
+                if og_match:
+                    og_title = og_match.group(1)
+                    for sep in [" - ", " | "]:
+                        if sep in og_title:
+                            parts = og_title.split(sep)
+                            candidate = parts[-1].strip()
+                            if candidate and candidate.lower() not in (
+                                "spotify", "podcast on spotify", "podcast",
+                            ):
+                                show_name = candidate
+                                break
+
+            if show_name:
+                logger.info("extracted show name from Spotify: '%s'", show_name)
+                feed_url = _apple_lookup_by_name(show_name)
+                if feed_url:
+                    logger.info("resolved Spotify -> RSS (via Apple): %s", feed_url)
+                    return feed_url
+                else:
+                    logger.info("could not find RSS feed for show '%s'", show_name)
 
     # Overcast: page contains RSS feed link
     if "overcast.fm" in domain:
-        try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": "CrowsNest/1.0",
-            })
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                html = resp.read().decode("utf-8", errors="replace")
-            feed_match = re.search(
-                r'href=["\']([^"\']+)["\'][^>]*type=["\']application/rss\+xml["\']',
-                html,
-            )
-            if not feed_match:
-                feed_match = re.search(
-                    r'type=["\']application/rss\+xml["\'][^>]*href=["\']([^"\']+)["\']',
-                    html,
-                )
-            if feed_match:
-                logger.info("resolved Overcast -> RSS: %s", feed_match.group(1))
-                return feed_match.group(1)
-        except Exception as exc:
-            logger.warning("Overcast scrape failed (non-fatal): %s", exc)
+        html = _fetch_page(url)
+        if html:
+            feed_url = _extract_rss_from_html(html)
+            if feed_url:
+                logger.info("resolved Overcast -> RSS: %s", feed_url)
+                return feed_url
+
+    # Generic web page: check for RSS link or PodcastEpisode schema
+    if domain and not any(d in domain for d in [
+        "podcasts.apple.com", "open.spotify.com", "overcast.fm",
+        "tiktok.com", "youtube.com", "youtu.be", "instagram.com",
+    ]):
+        html = _fetch_page(url)
+        if html:
+            # Check for podcast indicators
+            has_podcast_schema = '"PodcastEpisode"' in html or '"PodcastSeries"' in html
+            feed_url = _extract_rss_from_html(html)
+
+            if feed_url and has_podcast_schema:
+                logger.info("resolved podcast web page -> RSS: %s", feed_url)
+                return feed_url
+            elif feed_url:
+                # Has RSS but no podcast schema — might be a blog
+                # Only use if the RSS feed itself looks like a podcast
+                logger.debug("found RSS link but no podcast schema for %s", url)
 
     return None
 
@@ -319,11 +438,52 @@ def _match_episode_in_feed(feed_xml: str, url: str, yt_metadata: dict) -> dict |
 
         if matched:
             title_match = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item_xml)
-            return {
+            result = {
                 "title": title_match.group(1).strip() if title_match else "",
                 "transcript_url": transcript_match.group(1),
                 "transcript_type": transcript_match.group(2),
             }
+            # Also extract enclosure URL for audio fallback
+            enc_match = re.search(r'<enclosure[^>]+url=["\']([^"\']+)["\']', item_xml)
+            if enc_match:
+                result["enclosure_url"] = enc_match.group(1)
+            return result
+
+    return None
+
+
+def _find_episode_audio_in_feed(feed_xml: str, url: str, yt_metadata: dict) -> str | None:
+    """Find the audio enclosure URL for a matching episode in an RSS feed.
+
+    Used as a fallback when yt-dlp can't download audio (e.g. Spotify DRM).
+    Returns the direct audio URL or None.
+    """
+    apple_episode_id = _extract_apple_episode_id(url)
+    target_title = (yt_metadata.get("title") or "").lower().strip()
+
+    items = re.findall(r"<item>(.*?)</item>", feed_xml, re.DOTALL)
+
+    for item_xml in items:
+        enc_match = re.search(r'<enclosure[^>]+url=["\']([^"\']+)["\']', item_xml)
+        if not enc_match:
+            continue
+
+        matched = False
+
+        if apple_episode_id and apple_episode_id in item_xml:
+            matched = True
+
+        if not matched and target_title:
+            title_match = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item_xml)
+            if title_match:
+                feed_title = title_match.group(1).strip().lower()
+                if (target_title in feed_title
+                        or feed_title in target_title
+                        or _title_similarity(target_title, feed_title) > 0.6):
+                    matched = True
+
+        if matched:
+            return enc_match.group(1)
 
     return None
 
@@ -420,19 +580,22 @@ def _html_to_text(content: str) -> str:
 
 def _try_fetch_podcast_transcript(
     url: str, media_dir: str, link_id: int, yt_metadata: dict,
-) -> str | None:
+) -> tuple[str | None, str | None]:
     """Try to find and download a podcast transcript via RSS feed.
 
     Resolves the podcast URL to an RSS feed, searches for a
     <podcast:transcript> tag on the matching episode, downloads
     and converts the transcript.
 
-    Returns path to transcript .txt file, or None.
+    Returns (transcript_path, audio_url):
+        transcript_path — path to transcript .txt file, or None
+        audio_url — direct audio enclosure URL from RSS (for yt-dlp
+                    fallback when DRM blocks download), or None
     """
     feed_url = _resolve_rss_feed(url)
     if not feed_url:
         logger.info("link %d: could not resolve RSS feed for %s", link_id, url)
-        return None
+        return None, None
 
     # Fetch the RSS feed
     try:
@@ -443,21 +606,25 @@ def _try_fetch_podcast_transcript(
             feed_xml = resp.read().decode("utf-8", errors="replace")
     except Exception as exc:
         logger.warning("link %d: RSS feed fetch failed: %s", link_id, exc)
-        return None
+        return None, None
 
-    # Find the matching episode
+    # Try to find the audio enclosure URL (useful as yt-dlp fallback)
+    audio_url = _find_episode_audio_in_feed(feed_xml, url, yt_metadata)
+
+    # Find the matching episode with transcript
     episode = _match_episode_in_feed(feed_xml, url, yt_metadata)
     if not episode:
         logger.info("link %d: no transcript tag in RSS feed for this episode", link_id)
-        return None
+        return None, audio_url
 
     logger.info("link %d: found RSS transcript (%s) for '%s'",
                 link_id, episode["transcript_type"], episode["title"])
 
     # Download and convert the transcript
-    return _download_transcript(
+    transcript_path = _download_transcript(
         episode["transcript_url"], episode["transcript_type"], media_dir,
     )
+    return transcript_path, audio_url or episode.get("enclosure_url")
 
 
 # ---------------------------------------------------------------------------
@@ -597,13 +764,36 @@ def process_video(
     except (subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
         logger.warning("link %d: metadata fetch failed (non-fatal): %s", link_id, exc)
 
+    # If yt-dlp couldn't get metadata (DRM, etc.), try scraping the page
+    if not yt_metadata.get("title"):
+        try:
+            html = _fetch_page(url)
+            if html:
+                # Extract title from og:title or <title>
+                og_match = re.search(
+                    r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+                    html, re.IGNORECASE,
+                )
+                if not og_match:
+                    og_match = re.search(
+                        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']',
+                        html, re.IGNORECASE,
+                    )
+                if og_match:
+                    yt_metadata["title"] = og_match.group(1).strip()
+                    logger.info("link %d: scraped title from page: '%s'",
+                                link_id, yt_metadata["title"])
+        except Exception as exc:
+            logger.debug("link %d: page scrape for title failed: %s", link_id, exc)
+
     # Step 2: Try to fetch a transcript (cheapest sources first)
     transcript_path = None
+    rss_audio_url = None  # fallback audio URL from RSS feed
 
     # 2a: Podcast RSS transcript tag (fastest — direct download)
     if content_type == "podcast":
         try:
-            transcript_path = _try_fetch_podcast_transcript(
+            transcript_path, rss_audio_url = _try_fetch_podcast_transcript(
                 url, media_dir, link_id, yt_metadata,
             )
         except Exception as exc:
@@ -630,16 +820,39 @@ def process_video(
             capture_output=True,
             text=True,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"yt-dlp failed: {result.stderr[:500]}")
 
-        for name in os.listdir(media_dir):
-            if name.endswith((".m4a", ".mp3", ".wav", ".opus", ".webm")):
-                audio_file = os.path.join(media_dir, name)
-                break
+        if result.returncode != 0:
+            # yt-dlp failed (DRM, geo-block, etc.) — try RSS audio URL fallback
+            if rss_audio_url:
+                logger.info("link %d: yt-dlp failed, trying RSS audio URL: %s",
+                            link_id, rss_audio_url[:80])
+                audio_filename = sanitize_title(
+                    yt_metadata.get("title") or "episode"
+                ) + ".mp3"
+                audio_path = os.path.join(media_dir, audio_filename)
+                dl_result = subprocess.run(
+                    ["curl", "-sL", "--max-time", "300", "-o", audio_path, rss_audio_url],
+                    capture_output=True, text=True,
+                )
+                if dl_result.returncode == 0 and os.path.exists(audio_path):
+                    audio_file = audio_path
+                    logger.info("link %d: downloaded audio via RSS fallback", link_id)
+                else:
+                    raise RuntimeError(
+                        f"yt-dlp failed ({result.stderr.strip()[:200]}) "
+                        f"and RSS audio fallback also failed"
+                    )
+            else:
+                raise RuntimeError(f"yt-dlp failed: {result.stderr[:500]}")
 
         if not audio_file:
-            raise RuntimeError("yt-dlp succeeded but no audio file found in media_dir")
+            for name in os.listdir(media_dir):
+                if name.endswith((".m4a", ".mp3", ".wav", ".opus", ".webm")):
+                    audio_file = os.path.join(media_dir, name)
+                    break
+
+        if not audio_file:
+            raise RuntimeError("audio download succeeded but no audio file found in media_dir")
 
     # Derive video title from downloaded file or metadata
     video_title = ""
