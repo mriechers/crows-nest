@@ -575,7 +575,69 @@ def _html_to_text(content: str) -> str:
     # Decode entities
     text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
     text = text.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
+    text = text.replace("&#x27;", "'").replace("&#x2F;", "/")
+    # Decode any remaining numeric entities
+    text = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), text)
+    text = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), text)
     return text.strip()
+
+
+def _try_scrape_page_transcript(
+    url: str, media_dir: str, link_id: int,
+) -> str | None:
+    """Try to extract an embedded transcript from a podcast episode web page.
+
+    Looks for common patterns:
+    - Elements with id="transcript" or class containing "transcript"
+    - <h2>/<h3> headings with "Transcript" followed by content
+
+    Returns path to transcript .txt file, or None.
+    """
+    html = _fetch_page(url)
+    if not html:
+        return None
+
+    transcript_text = None
+
+    # Pattern 1: element with id="transcript"
+    # Handles both <div id="transcript"> and <fieldset id="transcript">
+    match = re.search(
+        r'id=["\']transcript["\'][^>]*>(.*?)(?:</div>|</fieldset>|</section>)',
+        html, re.DOTALL | re.IGNORECASE,
+    )
+
+    # Pattern 2: element with class containing "transcript"
+    if not match:
+        match = re.search(
+            r'class=["\'][^"\']*transcript[^"\']*["\'][^>]*>(.*?)(?:</div>|</section>)',
+            html, re.DOTALL | re.IGNORECASE,
+        )
+
+    # Pattern 3: heading "Transcript" followed by content until next heading
+    if not match:
+        match = re.search(
+            r'<h[23][^>]*>\s*(?:Full\s+)?Transcript\s*</h[23]>\s*(.*?)(?=<h[23]|<footer|</article)',
+            html, re.DOTALL | re.IGNORECASE,
+        )
+
+    if not match:
+        return None
+
+    raw_html = match.group(1)
+    transcript_text = _html_to_text(raw_html)
+
+    if not transcript_text or len(transcript_text) < 100:
+        logger.debug("link %d: page transcript too short (%d chars)",
+                     link_id, len(transcript_text) if transcript_text else 0)
+        return None
+
+    transcript_path = os.path.join(media_dir, "transcript.txt")
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        f.write(transcript_text)
+
+    logger.info("link %d: scraped page transcript (%d chars) from %s",
+                link_id, len(transcript_text), url)
+    return transcript_path
 
 
 def _try_fetch_podcast_transcript(
@@ -790,8 +852,15 @@ def process_video(
     transcript_path = None
     rss_audio_url = None  # fallback audio URL from RSS feed
 
-    # 2a: Podcast RSS transcript tag (fastest — direct download)
+    # 2a: Scrape transcript directly from the episode page (cheapest)
     if content_type == "podcast":
+        try:
+            transcript_path = _try_scrape_page_transcript(url, media_dir, link_id)
+        except Exception as exc:
+            logger.info("link %d: page transcript scrape failed (non-fatal): %s", link_id, exc)
+
+    # 2b: Podcast RSS transcript tag
+    if not transcript_path and content_type == "podcast":
         try:
             transcript_path, rss_audio_url = _try_fetch_podcast_transcript(
                 url, media_dir, link_id, yt_metadata,
@@ -799,7 +868,7 @@ def process_video(
         except Exception as exc:
             logger.info("link %d: podcast transcript fetch failed (non-fatal): %s", link_id, exc)
 
-    # 2b: yt-dlp subtitles (uploaded captions, then auto-generated)
+    # 2c: yt-dlp subtitles (uploaded captions, then auto-generated)
     if not transcript_path:
         try:
             transcript_path = _try_fetch_subtitles(url, media_dir, link_id)
