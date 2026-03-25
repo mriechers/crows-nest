@@ -367,7 +367,7 @@ Return a JSON object with:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/mriechers/crows-nest",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
                 "X-Title": "Crow's Nest Consolidator",
             },
             method="POST",

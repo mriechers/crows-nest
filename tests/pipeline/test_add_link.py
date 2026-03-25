@@ -1,10 +1,11 @@
 """Tests for the add_link.py CLI tool."""
 
+import os
 import sqlite3
 import subprocess
 import sys
 
-SCRIPT = "/PATH/TO/crows-nest/pipeline/add_link.py"
+SCRIPT = os.path.join(os.path.dirname(__file__), "../../pipeline/add_link.py")
 
 
 def test_add_link_cli(tmp_path):

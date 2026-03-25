@@ -30,6 +30,8 @@
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>SIGNAL_USER</key>
+        <string>+1XXXXXXXXXX</string>
     </dict>
 
     <key>RunAtLoad</key>

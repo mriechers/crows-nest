@@ -334,7 +334,7 @@ Content:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/mriechers/crows-nest",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
                 "X-Title": "Crow's Nest Pipeline",
             },
             method="POST",
@@ -481,7 +481,7 @@ Return a JSON object with these exact keys:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/mriechers/crows-nest",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
                 "X-Title": "Crow's Nest Pipeline",
             },
             method="POST",
@@ -696,7 +696,7 @@ def _refine_title_with_enrichment(claude_result: dict) -> dict:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/mriechers/crows-nest",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
                 "X-Title": "Crow's Nest Pipeline",
             },
             method="POST",

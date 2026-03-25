@@ -20,7 +20,7 @@ from utils import extract_urls, setup_logging
 logger = setup_logging("signal_listener")
 
 SIGNAL_CLI = "signal-cli"
-SIGNAL_USER = "SIGNAL_PHONE_NUMBER"
+SIGNAL_USER = os.environ.get("SIGNAL_USER", "")
 RECEIVE_TIMEOUT = 15
 SIGNAL_ATTACHMENTS_DIR = os.path.expanduser("~/.local/share/signal-cli/attachments")
 
@@ -267,6 +267,9 @@ def _log_message(sender: str, body: str, group: str = "") -> None:
 def run(db_path: str) -> None:
     """Main entry point: receive messages, extract URLs, store, confirm.
 
+    Requires SIGNAL_USER env var to be set to the phone number registered
+    with signal-cli (e.g. +15551234567).
+
     Receives messages, batches image attachments, then:
     - Non-image messages: log, store in signal_messages, extract URLs, add_link
     - Image batches: generate synthetic URL, add_link with image metadata
@@ -274,6 +277,10 @@ def run(db_path: str) -> None:
     Args:
         db_path: Path to the SQLite database file.
     """
+    if not SIGNAL_USER:
+        logger.error("SIGNAL_USER env var not set — cannot receive messages")
+        return
+
     init_db(db_path)
     messages = receive_messages()
 
