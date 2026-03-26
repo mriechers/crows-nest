@@ -21,10 +21,10 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 
-import sqlite3
 from collections import defaultdict
 
 from config import DB_PATH, OBSIDIAN_CLIPPINGS, OBSIDIAN_ARCHIVE, OBSIDIAN_VAULT
+from db import get_connection
 from summarizer import _extract_json, _sanitize_tag
 from utils import sanitize_title, setup_logging
 from keychain_secrets import get_secret
@@ -785,36 +785,39 @@ def notify_senders(results: list[dict], db_path: str = DB_PATH) -> None:
 
     # Look up senders from the links table
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
+        conn = get_connection(db_path)
         placeholders = ",".join("?" for _ in url_to_roundup)
         rows = conn.execute(
             f"SELECT url, sender FROM links WHERE url IN ({placeholders}) AND sender IS NOT NULL",
             list(url_to_roundup.keys()),
         ).fetchall()
-        conn.close()
     except Exception as exc:
         logger.warning("could not query senders for notification: %s", exc)
         return
+    finally:
+        try:
+            conn.close()
+        except NameError:
+            pass
 
-    # Group roundup titles by sender
+    # Group roundup titles by sender, tracking per-sender note counts
     sender_roundups: dict[str, set[str]] = defaultdict(set)
     for row in rows:
         sender_roundups[row["sender"]].add(url_to_roundup[row["url"]])
 
-    # Total notes consolidated
-    total_notes = sum(r["note_count"] for r in results)
-    total_roundups = len(results)
+    # Build per-sender note counts from results
+    roundup_note_counts = {r["roundup_title"]: r["note_count"] for r in results}
 
     for sender, titles in sender_roundups.items():
         # Only DM senders that look like phone numbers (e.g. +16125551234)
         if not sender.startswith("+"):
             logger.info("skipping non-phone sender: %s", sender)
             continue
+        sender_notes = sum(roundup_note_counts.get(t, 0) for t in titles)
         title_list = ", ".join(sorted(titles))
         msg = (
-            f"Crow's Nest consolidated {total_notes} clippings "
-            f"into {total_roundups} roundup(s): {title_list}"
+            f"Crow's Nest consolidated {sender_notes} clippings "
+            f"into {len(titles)} roundup(s): {title_list}"
         )
         logger.info("notifying %s: %s", sender, msg)
         send_confirmation(sender, msg)
