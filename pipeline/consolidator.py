@@ -21,10 +21,14 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 
-from config import OBSIDIAN_CLIPPINGS, OBSIDIAN_ARCHIVE, OBSIDIAN_VAULT
+from collections import defaultdict
+
+from config import DB_PATH, OBSIDIAN_CLIPPINGS, OBSIDIAN_ARCHIVE, OBSIDIAN_VAULT
+from db import get_connection
 from summarizer import _extract_json, _sanitize_tag
 from utils import sanitize_title, setup_logging
 from keychain_secrets import get_secret
+from signal_listener import send_confirmation
 
 logger = setup_logging("crows-nest.consolidator")
 
@@ -685,17 +689,21 @@ def execute_workflow(
     clippings_dir: str = None,
     min_shared_tags: int = 2,
     min_cluster_size: int = 3,
-) -> None:
-    """Full workflow: scan, cluster, verify, generate, archive."""
+) -> list[dict]:
+    """Full workflow: scan, cluster, verify, generate, archive.
+
+    Returns a list of result dicts, one per cluster:
+        {"roundup_title": str, "note_count": int, "notes": list[dict]}
+    """
     clippings = scan_clippings(clippings_dir)
     if not clippings:
         print("No clippings found.")
-        return
+        return []
 
     clusters = compute_clusters(clippings, min_shared_tags, min_cluster_size)
     if not clusters:
         print("No clusters found with current thresholds.")
-        return
+        return []
 
     print_clusters(clusters)
 
@@ -707,6 +715,7 @@ def execute_workflow(
     inbox_dir = os.path.join(OBSIDIAN_VAULT, "0 - INBOX")
     os.makedirs(inbox_dir, exist_ok=True)
 
+    results = []
     for cluster in clusters:
         roundup_title = cluster.get("roundup_title", cluster["label"] + " — Roundup")
         safe_filename = sanitize_title(roundup_title)
@@ -742,7 +751,76 @@ def execute_workflow(
         archived = archive_clippings(cluster, safe_filename)
         print(f"  Archived {len(archived)} original note(s)")
 
-    print(f"\nDone! Created {len(clusters)} roundup note(s).")
+        results.append({
+            "roundup_title": roundup_title,
+            "note_count": len(cluster["notes"]),
+            "notes": cluster["notes"],
+        })
+
+    print(f"\nDone! Created {len(results)} roundup note(s).")
+    return results
+
+
+def notify_senders(results: list[dict], db_path: str = DB_PATH) -> None:
+    """Send a Signal DM to each sender whose links were consolidated.
+
+    Looks up sender phone numbers by matching clipping source URLs
+    against the links table in the pipeline database.
+    """
+    if not results:
+        return
+
+    # Collect all source URLs from consolidated notes
+    url_to_roundup: dict[str, str] = {}
+    for result in results:
+        title = result["roundup_title"]
+        for note in result["notes"]:
+            source_url = note.get("source", "")
+            if source_url:
+                url_to_roundup[source_url] = title
+
+    if not url_to_roundup:
+        logger.info("no source URLs found in consolidated notes — skipping notify")
+        return
+
+    # Look up senders from the links table
+    try:
+        conn = get_connection(db_path)
+        placeholders = ",".join("?" for _ in url_to_roundup)
+        rows = conn.execute(
+            f"SELECT url, sender FROM links WHERE url IN ({placeholders}) AND sender IS NOT NULL",
+            list(url_to_roundup.keys()),
+        ).fetchall()
+    except Exception as exc:
+        logger.warning("could not query senders for notification: %s", exc)
+        return
+    finally:
+        try:
+            conn.close()
+        except NameError:
+            pass
+
+    # Group roundup titles by sender, tracking per-sender note counts
+    sender_roundups: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        sender_roundups[row["sender"]].add(url_to_roundup[row["url"]])
+
+    # Build per-sender note counts from results
+    roundup_note_counts = {r["roundup_title"]: r["note_count"] for r in results}
+
+    for sender, titles in sender_roundups.items():
+        # Only DM senders that look like phone numbers (e.g. +16125551234)
+        if not sender.startswith("+"):
+            logger.info("skipping non-phone sender: %s", sender)
+            continue
+        sender_notes = sum(roundup_note_counts.get(t, 0) for t in titles)
+        title_list = ", ".join(sorted(titles))
+        msg = (
+            f"Crow's Nest consolidated {sender_notes} clippings "
+            f"into {len(titles)} roundup(s): {title_list}"
+        )
+        logger.info("notifying %s: %s", sender, msg)
+        send_confirmation(sender, msg)
 
 
 def main():
@@ -765,13 +843,19 @@ def main():
         "--min-size", type=int, default=2,
         help="Minimum cluster size (default: 2)",
     )
+    parser.add_argument(
+        "--notify", action="store_true",
+        help="Send Signal DM to senders whose links were consolidated",
+    )
     args = parser.parse_args()
 
     if args.execute:
-        execute_workflow(
+        results = execute_workflow(
             min_shared_tags=args.min_tags,
             min_cluster_size=args.min_size,
         )
+        if args.notify and results:
+            notify_senders(results)
     else:
         clippings = scan_clippings()
         clusters = compute_clusters(clippings, args.min_tags, args.min_size)

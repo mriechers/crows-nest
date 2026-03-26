@@ -15,12 +15,13 @@ from datetime import datetime, timezone
 from config import MESSAGE_LOG
 from content_types import classify_url
 from db import init_db, add_link, get_connection
+from keychain_secrets import get_secret
 from utils import extract_urls, setup_logging
 
 logger = setup_logging("signal_listener")
 
 SIGNAL_CLI = "signal-cli"
-SIGNAL_USER = os.environ.get("SIGNAL_USER", "")
+SIGNAL_USER = get_secret("SIGNAL_USER") or ""
 RECEIVE_TIMEOUT = 15
 SIGNAL_ATTACHMENTS_DIR = os.path.expanduser("~/.local/share/signal-cli/attachments")
 
@@ -267,8 +268,8 @@ def _log_message(sender: str, body: str, group: str = "") -> None:
 def run(db_path: str) -> None:
     """Main entry point: receive messages, extract URLs, store, confirm.
 
-    Requires SIGNAL_USER env var to be set to the phone number registered
-    with signal-cli (e.g. +15551234567).
+    Requires SIGNAL_USER to be set in macOS Keychain
+    (developer.workspace.SIGNAL_USER) or as an env var.
 
     Receives messages, batches image attachments, then:
     - Non-image messages: log, store in signal_messages, extract URLs, add_link
@@ -278,7 +279,7 @@ def run(db_path: str) -> None:
         db_path: Path to the SQLite database file.
     """
     if not SIGNAL_USER:
-        logger.error("SIGNAL_USER env var not set — cannot receive messages")
+        logger.error("SIGNAL_USER not set (check Keychain or env var) — cannot receive messages")
         return
 
     init_db(db_path)
