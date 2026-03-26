@@ -20,8 +20,8 @@ from utils import extract_urls, setup_logging
 logger = setup_logging("signal_listener")
 
 SIGNAL_CLI = "signal-cli"
-SIGNAL_USER = "SIGNAL_PHONE_NUMBER"
-RECEIVE_TIMEOUT = 10
+SIGNAL_USER = os.environ.get("SIGNAL_USER", "")
+RECEIVE_TIMEOUT = 15
 SIGNAL_ATTACHMENTS_DIR = os.path.expanduser("~/.local/share/signal-cli/attachments")
 
 
@@ -215,6 +215,17 @@ def receive_messages() -> list[dict]:
             timeout=RECEIVE_TIMEOUT + 5,
         )
         return _parse_json_output(result.stdout)
+    except subprocess.TimeoutExpired as exc:
+        # signal-cli writes messages to stdout as they arrive, so even
+        # on a timeout we may have captured messages.  These have already
+        # been consumed from the server — we MUST parse them or they're
+        # lost forever.
+        partial = (exc.stdout or "") if isinstance(exc.stdout, str) else (exc.stdout or b"").decode("utf-8", errors="replace")
+        if partial.strip():
+            logger.warning("signal-cli timed out but captured partial output (%d bytes) — parsing", len(partial))
+            return _parse_json_output(partial)
+        logger.error("signal-cli timed out with no output")
+        return []
     except Exception as exc:
         logger.error("Failed to receive Signal messages: %s", exc)
         return []
@@ -256,6 +267,9 @@ def _log_message(sender: str, body: str, group: str = "") -> None:
 def run(db_path: str) -> None:
     """Main entry point: receive messages, extract URLs, store, confirm.
 
+    Requires SIGNAL_USER env var to be set to the phone number registered
+    with signal-cli (e.g. +15551234567).
+
     Receives messages, batches image attachments, then:
     - Non-image messages: log, store in signal_messages, extract URLs, add_link
     - Image batches: generate synthetic URL, add_link with image metadata
@@ -263,6 +277,10 @@ def run(db_path: str) -> None:
     Args:
         db_path: Path to the SQLite database file.
     """
+    if not SIGNAL_USER:
+        logger.error("SIGNAL_USER env var not set — cannot receive messages")
+        return
+
     init_db(db_path)
     messages = receive_messages()
 

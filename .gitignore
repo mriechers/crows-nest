@@ -7,6 +7,7 @@ build/
 .env
 .worktrees/
 .DS_Store
+.claude/settings.local.json
 knowledge/**/*.html
 logs/*.json
 data/

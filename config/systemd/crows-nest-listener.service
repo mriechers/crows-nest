@@ -9,6 +9,7 @@ WorkingDirectory=/opt/crows-nest/pipeline
 Environment=CROWS_NEST_HOME=/opt/crows-nest
 Environment=OBSIDIAN_VAULT=/data/obsidian/MarkBrain
 Environment=MEDIA_ROOT=/data/media/crows-nest
+Environment=SIGNAL_USER=+1XXXXXXXXXX
 # Secrets: set these or use keychain_secrets env var fallback
 # Environment=OPENROUTER_API_KEY=sk-...
 

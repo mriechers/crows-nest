@@ -1,69 +1,68 @@
-# Knowledge Server Agent Instructions
+# Crow's Nest
 
-## What This Server Knows
+Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian content preservation pipeline**.
 
-This is a domain-specific knowledge server providing curated, searchable documentation about **[your domain]**. It contains pre-indexed documents organized by category, with keyword search, excerpt extraction, and full document retrieval.
+## Pipeline
 
-## Available Tools
+4-stage automated pipeline that captures URLs shared via Signal, processes them, and creates structured Obsidian notes.
 
-### `search_knowledge(query, category?, max_results=5, full_document=False)`
-**Your primary tool.** Search the knowledge base using natural language keywords.
-- Returns ranked results with relevance scores
-- By default returns short excerpts (~500 chars) to minimize token usage
-- Set `full_document=True` only when you need the complete text
-- Use `category` to narrow results to a specific topic area
+### Stages
 
-### `list_topics()`
-**Start here for discovery.** Returns all categories with document counts (~100 tokens).
-Call this first to understand what knowledge is available before searching.
+1. **Listener** (`pipeline/signal_listener.py`) — polls signal-cli every 5 min, extracts URLs and image batches, saves to SQLite
+2. **Processor** (`pipeline/processor.py`) — downloads media, transcribes audio/video with Whisper, scrapes web pages
+3. **Summarizer** (`pipeline/summarizer.py`) — calls Claude Haiku via OpenRouter for structured analysis, writes Obsidian notes to `0 - INBOX/Clippings/`
+4. **Archiver** (`pipeline/archiver.py`) — tar.gz + SHA-256 manifest → Cloudflare R2 (`crows-nest-archive` bucket)
 
-### `get_document(path)`
-**Direct retrieval.** Fetch a specific document by its path when you already know what you need.
-Use paths from search results or the `knowledge://documents` resource.
+### Key files
 
-### `get_server_info()`
-**Metadata.** Returns server identity, document count, categories, and last refresh timestamp.
-Useful for understanding the scope and freshness of the knowledge base.
+- `pipeline/config.py` — all paths derived from env vars (`CROWS_NEST_HOME`, `OBSIDIAN_VAULT`, `MEDIA_ROOT`). Defaults to macOS dev paths; override for Proxmox/Linux.
+- `pipeline/db.py` — SQLite status machine (pending → downloading → transcribed → summarized → archived)
+- `pipeline/status.py` — dashboard (`python status.py`) and health check (`python status.py --health`)
+- `pipeline/add_link.py` — CLI to manually queue URLs
+- `pipeline/keychain_secrets.py` — macOS Keychain with env var fallback for API keys
 
-## Resources (Read-Only)
+### Running manually
 
-- `knowledge://sources` — Source manifest showing where content was crawled from
-- `knowledge://documents` — Complete list of all document paths
-- `knowledge://document/{path}` — Read a specific document without a tool call
+```bash
+cd ~/Developer/second-brain/crows-nest
+.venv/bin/python pipeline/status.py           # dashboard
+.venv/bin/python pipeline/add_link.py "URL"   # queue a URL
+.venv/bin/python pipeline/processor.py        # process pending
+.venv/bin/python pipeline/summarizer.py       # summarize transcribed
+```
 
-## Usage Patterns
+### Scheduling
 
-### Quick lookup
-1. `search_knowledge("your question")` — get excerpts
-2. If an excerpt looks relevant, `get_document(path)` for full text
+- **macOS**: launchd plists in `config/launchd/` (installed to `~/Library/LaunchAgents/`)
+- **Linux**: systemd timer/service units in `config/systemd/` (install to `/etc/systemd/system/`)
 
-### Broad exploration
-1. `list_topics()` — see what categories exist
-2. `search_knowledge(query, category="specific-area")` — narrow search
+### Platform portability
 
-### When results are insufficient
-- Try different keyword combinations
-- Search without a category filter
-- Use `full_document=True` if excerpts don't provide enough context
-- If no results found, the query is logged for future knowledge expansion
+The pipeline runs on macOS and Linux. Platform-specific behavior:
+- Image processing: uses `sips` (macOS) or ImageMagick (Linux) — auto-detected
+- Secrets: macOS Keychain with env var fallback — on Linux, just set env vars
+- All paths configurable via env vars in `config.py`
 
-## Knowledge Structure
+## MCP Knowledge Server
 
-Documents are organized in `knowledge/` by category subdirectories:
+Domain-specific knowledge server (`src/mcp_knowledge/`) with search, categories, and document retrieval.
+
+### Available Tools
+
+- `search_knowledge(query, category?, max_results=5, full_document=False)` — keyword search with excerpts
+- `list_topics()` — categories with document counts
+- `get_document(path)` — fetch full document by path
+- `get_server_info()` — server metadata
+
+### Knowledge Structure
+
 ```
 knowledge/
-├── sources.json          # Where content came from
+├── sources.json
 ├── category-name/
-│   ├── document.md       # Searchable content (indexed)
+│   ├── document.md       # Searchable (indexed)
 │   ├── document.html     # Raw source (not indexed)
-│   └── document.json     # Metadata (timestamps, URLs)
+│   └── document.json     # Metadata
 ```
 
-Only `.md` files are searchable. The first `# ` heading in each file is used as the document title and receives a significant score boost in search results.
-
-## Extending This Server
-
-To add new knowledge:
-1. Add a source entry to `knowledge/sources.json`
-2. Run `python scripts/crawl_docs.py` to fetch and convert
-3. Or manually create `.md` files in the appropriate category directory
+To add knowledge: add to `sources.json` and run `python scripts/crawl_docs.py`, or manually create `.md` files.

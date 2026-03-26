@@ -5,12 +5,21 @@ from datetime import datetime
 
 from config import MEDIA_ROOT
 
-URL_PATTERN = re.compile(r"https?://[^\s<>\"',;!?)]+")
+URL_PATTERN = re.compile(r"https?://[^\s<>\"',;!)]+")
 
 
 def _strip_trailing_punct(url: str) -> str:
-    """Strip trailing sentence punctuation from a URL."""
-    return url.rstrip(".,!?)")
+    """Strip trailing sentence punctuation from a URL.
+
+    Strips .,!?) but only when they're genuinely trailing — a ? followed
+    by more URL characters (query params) is kept.
+    """
+    # Strip simple trailing punctuation
+    url = url.rstrip(".,!)")
+    # Strip trailing ? only if it's the very end (no query params after it)
+    if url.endswith("?"):
+        url = url[:-1]
+    return url
 
 
 def sanitize_title(title: str, max_length: int = 100) -> str:

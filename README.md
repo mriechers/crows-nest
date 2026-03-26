@@ -19,7 +19,7 @@ A reusable template for building domain-specific [MCP](https://modelcontextproto
 
 ```bash
 # Use GitHub's "Use this template" button, or:
-gh repo create my-knowledge-server --template mriechers/mcp-knowledge-server-template
+gh repo create my-knowledge-server --template your-username/crows-nest
 cd my-knowledge-server
 ```
 

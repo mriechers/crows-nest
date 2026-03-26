@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -333,7 +334,7 @@ Content:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/mriechers/crows-nest",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
                 "X-Title": "Crow's Nest Pipeline",
             },
             method="POST",
@@ -480,7 +481,7 @@ Return a JSON object with these exact keys:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://github.com/mriechers/crows-nest",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
                 "X-Title": "Crow's Nest Pipeline",
             },
             method="POST",
@@ -515,6 +516,207 @@ Return a JSON object with these exact keys:
                 len(result.get("key_points", [])), len(result.get("tags", [])),
                 len(result.get("extracted_text", "")))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Creator enrichment — web search for unnamed artifacts
+# ---------------------------------------------------------------------------
+
+# Tags (or tag components) that suggest a specific nameable artifact
+_ARTIFACT_CATEGORIES = {
+    "book": "book",
+    "film": "film",
+    "movie": "movie",
+    "album": "album",
+    "game": "game",
+    "product": "product",
+    "app": "app",
+    "podcast": "podcast",
+    "documentary": "documentary",
+}
+
+
+def _detect_artifact_category(tags: list[str]) -> str | None:
+    """Check if any topic tag contains an artifact category keyword."""
+    for tag in tags:
+        parts = tag.split("-")
+        for part in parts:
+            # Simple plural stemming
+            stem = part[:-1] if part.endswith("s") and len(part) > 3 else part
+            if stem in _ARTIFACT_CATEGORIES:
+                return _ARTIFACT_CATEGORIES[stem]
+            if part in _ARTIFACT_CATEGORIES:
+                return _ARTIFACT_CATEGORIES[part]
+    return None
+
+
+def enrich_with_creator_search(
+    claude_result: dict,
+    creator: str,
+    metadata: dict = None,
+) -> dict:
+    """Search for a creator's specific artifact when the summary is vague.
+
+    Fires when: there's a known creator AND tags suggest a category artifact
+    (book, film, album, etc.). Adds top search results to related_links.
+
+    Modifies claude_result in place and returns it.
+    """
+    if not creator:
+        return claude_result
+
+    tags = claude_result.get("tags", [])
+    category = _detect_artifact_category(tags)
+    if not category:
+        return claude_result
+
+    # Build search query
+    query = f"{creator} {category}"
+    logger.info("enrichment search: %s", query)
+
+    try:
+        # DuckDuckGo lite HTML — lightweight, no API key needed
+        encoded_query = urllib.parse.quote_plus(query)
+        url = f"https://lite.duckduckgo.com/lite/?q={encoded_query}"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "CrowsNest/1.0 (content-pipeline)"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+
+        # Extract result titles and URLs from DDG lite HTML
+        # Format: <a rel="nofollow" href="URL" class='result-link'>Title</a>
+        results = re.findall(
+            r"<a[^>]+class='result-link'[^>]*href=['\"]([^'\"]+)['\"][^>]*>([^<]+)</a>",
+            html,
+        )
+        if not results:
+            # Try alternate pattern (href before class)
+            results = re.findall(
+                r"<a[^>]+href=['\"]([^'\"]+)['\"][^>]*class='result-link'[^>]*>([^<]+)</a>",
+                html,
+            )
+
+        if results:
+            existing_links = claude_result.get("related_links", []) or []
+            added = 0
+            for link_url, link_title in results[:6]:
+                link_title = link_title.strip()
+
+                # Resolve DDG redirect URLs to actual destination
+                if "duckduckgo.com/l/" in link_url:
+                    parsed_qs = urllib.parse.parse_qs(
+                        urllib.parse.urlparse(link_url).query
+                    )
+                    uddg = parsed_qs.get("uddg", [None])[0]
+                    if uddg:
+                        link_url = urllib.parse.unquote(uddg)
+
+                # Ensure URL has a scheme
+                if link_url.startswith("//"):
+                    link_url = "https:" + link_url
+
+                # Skip ads, social profiles, and DDG internal links
+                if any(skip in link_url for skip in [
+                    "tiktok.com", "instagram.com", "twitter.com", "x.com",
+                    "duckduckgo.com/y.js", "amazon.com/s?",
+                    "bing.com/aclick",
+                ]):
+                    continue
+                entry = f"{link_title} — {link_url}"
+                if entry not in existing_links:
+                    existing_links.append(entry)
+                    added += 1
+                if added >= 2:
+                    break
+
+            claude_result["related_links"] = existing_links
+            if added:
+                logger.info("enrichment: added %d reference link(s) for '%s %s'",
+                            added, creator, category)
+                # Refine title now that we have artifact context
+                _refine_title_with_enrichment(claude_result)
+        else:
+            logger.debug("enrichment: no results found for '%s'", query)
+
+    except Exception as exc:
+        # Enrichment is best-effort — never block the pipeline
+        logger.warning("enrichment search failed (non-fatal): %s", exc)
+
+    return claude_result
+
+
+def _refine_title_with_enrichment(claude_result: dict) -> dict:
+    """Ask Haiku to refine the note title using enrichment context.
+
+    Only called when enrich_with_creator_search added new related_links.
+    Modifies claude_result["title"] in place.
+    """
+    api_key = get_secret("OPENROUTER_API_KEY")
+    if not api_key:
+        return claude_result
+
+    current_title = claude_result.get("title", "")
+    links = claude_result.get("related_links", [])
+    summary = claude_result.get("summary", "")
+
+    prompt = (
+        f"Current title: {current_title}\n"
+        f"Summary: {summary}\n"
+        f"Reference links found:\n"
+        + "\n".join(f"  - {l}" for l in links) +
+        f"\n\nThese reference links were found by searching for the creator's work. "
+        f"One of these links likely contains the SPECIFIC NAME of the book, film, "
+        f"album, product, or other work discussed in the content. Look for a link "
+        f"from a retailer, store, Wikipedia, or official site — those tend to have "
+        f"the actual work title (e.g. 'The ADHD Field Guide for Adults' from Barnes "
+        f"& Noble, not a site tagline). Ignore generic site descriptions.\n\n"
+        f"Revise the title to include that specific work name. Examples:\n"
+        f"- 'Book Release Day' + 'The ADHD Field Guide|Barnes & Noble' → "
+        f"'ADHD Field Guide Release Day — Childhood Library Full Circle'\n"
+        f"- 'New Horror Game Revealed' + 'Horda - Steam' → "
+        f"'Horda — Darkwood Creator Reveals New Horror Game'\n\n"
+        f"Keep it 5-12 words. Return ONLY the revised title, nothing else."
+    )
+
+    payload = json.dumps({
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 60,
+    }).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            OPENROUTER_API_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
+                "X-Title": "Crow's Nest Pipeline",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+
+        response = json.loads(raw)
+        refined = response["choices"][0]["message"]["content"].strip().strip('"')
+
+        if refined and refined != current_title:
+            logger.info("title refined: '%s' -> '%s'", current_title, refined)
+            claude_result["title"] = refined
+        else:
+            logger.debug("title unchanged after refinement")
+
+    except Exception as exc:
+        logger.warning("title refinement failed (non-fatal): %s", exc)
+
+    return claude_result
 
 
 def _extract_json(text: str) -> dict | None:
@@ -714,6 +916,12 @@ def run(db_path: str) -> None:
                     sender=sender,
                     creator=creator,
                 )
+
+            # Enrich with creator search for unnamed artifacts
+            creator = metadata.get("creator") or ""
+            claude_result = enrich_with_creator_search(
+                claude_result, creator, metadata
+            )
 
             # Use metadata title for images, AI title otherwise
             title_hint = (
