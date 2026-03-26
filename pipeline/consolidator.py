@@ -29,6 +29,7 @@ from keychain_secrets import get_secret
 logger = setup_logging("crows-nest.consolidator")
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODEL = "anthropic/claude-haiku-4-5"
 
 
 def _note_name(note: dict) -> str:
@@ -41,7 +42,6 @@ def _note_name(note: dict) -> str:
     if fn.endswith(".md"):
         return fn[:-3]
     return sanitize_title(note.get("title", "untitled"))
-OPENROUTER_MODEL = "anthropic/claude-haiku-4-5"
 
 # Tags that indicate format/pipeline metadata, not topic
 STANDARD_TAGS = {
@@ -104,7 +104,8 @@ def parse_clipping(filepath: str) -> dict | None:
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("could not read clipping %s: %s", filepath, exc)
         return None
 
     # Split on frontmatter delimiters
@@ -639,12 +640,11 @@ def archive_clippings(cluster: dict, roundup_title: str) -> list[str]:
                 flags=re.MULTILINE,
             )
 
-            # Move to archive first, then update content at destination
+            # Write modified content to destination, then remove source
             dest = os.path.join(archive_dir, os.path.basename(filepath))
-            shutil.move(filepath, dest)
-
             with open(dest, "w", encoding="utf-8") as f:
                 f.write(content)
+            os.remove(filepath)
 
             moved.append(dest)
             logger.info("archived: %s -> %s", os.path.basename(filepath), dest)

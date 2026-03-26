@@ -144,7 +144,12 @@ def fetch_web_content(url: str) -> tuple[str, str]:
         capture_output=True,
         text=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(f"curl failed for {url}: {result.stderr.strip()[:300]}")
+
     html = result.stdout
+    if not html.strip():
+        raise RuntimeError(f"empty response from {url}")
 
     # Extract title
     title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
@@ -535,6 +540,8 @@ def _download_transcript(transcript_url: str, transcript_type: str,
         text = content
 
     if len(text) < 50:
+        logger.info("transcript too short after %s conversion (%d chars), skipping",
+                     transcript_type, len(text))
         return None
 
     transcript_path = os.path.join(media_dir, "transcript.txt")
@@ -576,9 +583,17 @@ def _html_to_text(content: str) -> str:
     text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
     text = text.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
     text = text.replace("&#x27;", "'").replace("&#x2F;", "/")
-    # Decode any remaining numeric entities
-    text = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), text)
-    text = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), text)
+    # Decode any remaining numeric entities (guard against out-of-range values)
+    text = re.sub(
+        r'&#x([0-9a-fA-F]+);',
+        lambda m: chr(int(m.group(1), 16)) if int(m.group(1), 16) <= 0x10FFFF else '',
+        text,
+    )
+    text = re.sub(
+        r'&#(\d+);',
+        lambda m: chr(int(m.group(1))) if int(m.group(1)) <= 0x10FFFF else '',
+        text,
+    )
     return text.strip()
 
 
