@@ -15,12 +15,13 @@ from datetime import datetime, timezone
 from config import MESSAGE_LOG
 from content_types import classify_url
 from db import init_db, add_link, get_connection
+from keychain_secrets import get_secret
 from utils import extract_urls, setup_logging
 
 logger = setup_logging("signal_listener")
 
 SIGNAL_CLI = "signal-cli"
-SIGNAL_USER = os.environ.get("SIGNAL_USER", "")
+SIGNAL_USER = get_secret("SIGNAL_USER") or ""
 RECEIVE_TIMEOUT = 15
 SIGNAL_ATTACHMENTS_DIR = os.path.expanduser("~/.local/share/signal-cli/attachments")
 
