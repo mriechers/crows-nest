@@ -890,14 +890,16 @@ def process_video(
         except Exception as exc:
             logger.info("link %d: subtitle fetch failed (non-fatal): %s", link_id, exc)
 
-    # Step 3: Download audio only if we need Whisper
+    # Step 3: Download video (preserving the file) and extract audio for Whisper
     audio_file = None
+    video_file = None
     if not transcript_path:
-        result = subprocess.run(
+        # 3a: Try full video download first (mp4 preferred)
+        vid_result = subprocess.run(
             [
                 "yt-dlp",
-                "--extract-audio",
-                "--audio-format", "m4a",
+                "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "--merge-output-format", "mp4",
                 "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
                 url,
             ],
@@ -905,38 +907,75 @@ def process_video(
             text=True,
         )
 
-        if result.returncode != 0:
-            # yt-dlp failed (DRM, geo-block, etc.) — try RSS audio URL fallback
-            if rss_audio_url:
-                logger.info("link %d: yt-dlp failed, trying RSS audio URL: %s",
-                            link_id, rss_audio_url[:80])
-                audio_filename = sanitize_title(
-                    yt_metadata.get("title") or "episode"
-                ) + ".mp3"
-                audio_path = os.path.join(media_dir, audio_filename)
-                dl_result = subprocess.run(
-                    ["curl", "-sL", "--max-time", "300", "-o", audio_path, rss_audio_url],
-                    capture_output=True, text=True,
-                )
-                if dl_result.returncode == 0 and os.path.exists(audio_path):
-                    audio_file = audio_path
-                    logger.info("link %d: downloaded audio via RSS fallback", link_id)
-                else:
-                    raise RuntimeError(
-                        f"yt-dlp failed ({result.stderr.strip()[:200]}) "
-                        f"and RSS audio fallback also failed"
-                    )
-            else:
-                raise RuntimeError(f"yt-dlp failed: {result.stderr[:500]}")
-
-        if not audio_file:
+        if vid_result.returncode == 0:
+            # Find the downloaded video file
             for name in os.listdir(media_dir):
-                if name.endswith((".m4a", ".mp3", ".wav", ".opus", ".webm")):
-                    audio_file = os.path.join(media_dir, name)
+                if name.endswith((".mp4", ".mkv", ".webm")):
+                    video_file = os.path.join(media_dir, name)
                     break
 
+        if video_file:
+            # 3b: Extract audio from the video via ffmpeg
+            audio_filename = os.path.splitext(os.path.basename(video_file))[0] + ".m4a"
+            audio_path = os.path.join(media_dir, audio_filename)
+            ffmpeg_result = subprocess.run(
+                ["ffmpeg", "-i", video_file, "-vn", "-acodec", "aac", "-y", audio_path],
+                capture_output=True, text=True,
+            )
+            if ffmpeg_result.returncode == 0 and os.path.exists(audio_path):
+                audio_file = audio_path
+                logger.info("link %d: extracted audio from video: %s", link_id, audio_path)
+            else:
+                logger.warning("link %d: ffmpeg audio extraction failed, "
+                               "falling back to audio-only download", link_id)
+                # Fall through to audio-only download below
+
+        # 3c: Fall back to audio-only download if no audio extracted yet
         if not audio_file:
-            raise RuntimeError("audio download succeeded but no audio file found in media_dir")
+            result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "--extract-audio",
+                    "--audio-format", "m4a",
+                    "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
+                    url,
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode != 0:
+                # yt-dlp failed (DRM, geo-block, etc.) — try RSS audio URL fallback
+                if rss_audio_url:
+                    logger.info("link %d: yt-dlp failed, trying RSS audio URL: %s",
+                                link_id, rss_audio_url[:80])
+                    audio_filename = sanitize_title(
+                        yt_metadata.get("title") or "episode"
+                    ) + ".mp3"
+                    audio_path = os.path.join(media_dir, audio_filename)
+                    dl_result = subprocess.run(
+                        ["curl", "-sL", "--max-time", "300", "-o", audio_path, rss_audio_url],
+                        capture_output=True, text=True,
+                    )
+                    if dl_result.returncode == 0 and os.path.exists(audio_path):
+                        audio_file = audio_path
+                        logger.info("link %d: downloaded audio via RSS fallback", link_id)
+                    else:
+                        raise RuntimeError(
+                            f"yt-dlp failed ({result.stderr.strip()[:200]}) "
+                            f"and RSS audio fallback also failed"
+                        )
+                else:
+                    raise RuntimeError(f"yt-dlp failed: {result.stderr[:500]}")
+
+            if not audio_file:
+                for name in os.listdir(media_dir):
+                    if name.endswith((".m4a", ".mp3", ".wav", ".opus", ".webm")):
+                        audio_file = os.path.join(media_dir, name)
+                        break
+
+            if not audio_file:
+                raise RuntimeError("audio download succeeded but no audio file found in media_dir")
 
     # Derive video title from downloaded file or metadata
     video_title = ""
@@ -984,7 +1023,8 @@ def process_video(
         json.dump(metadata, f, indent=2)
 
     update_status(link_id=link_id, status="downloading",
-                  download_path=audio_file or "", db_path=db_path)
+                  download_path=media_dir, video_path=video_file or "",
+                  db_path=db_path)
 
     # Step 4: Transcribe with Whisper if no subtitles were found
     if not transcript_path:
@@ -1005,6 +1045,7 @@ def process_video(
         link_id=link_id,
         status="transcribed",
         transcript_path=transcript_path,
+        video_path=video_file or "",
         db_path=db_path,
     )
     log_processing(link_id, "process_video", "success",
