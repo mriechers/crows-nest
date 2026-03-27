@@ -43,6 +43,17 @@ The pipeline runs on macOS and Linux. Platform-specific behavior:
 - Secrets: macOS Keychain with env var fallback — on Linux, just set env vars
 - All paths configurable via env vars in `config.py`
 
+### R2 Archival Credentials
+
+Store in macOS Keychain:
+```bash
+security add-generic-password -a "$USER" -s "developer.workspace.R2_ACCESS_KEY_ID" -w "your-key" -U
+security add-generic-password -a "$USER" -s "developer.workspace.R2_SECRET_ACCESS_KEY" -w "your-secret" -U
+security add-generic-password -a "$USER" -s "developer.workspace.R2_ENDPOINT_URL" -w "https://<account-id>.r2.cloudflarestorage.com" -U
+```
+
+Or set environment variables with the same names.
+
 ## MCP Knowledge Server
 
 Domain-specific knowledge server (`src/mcp_knowledge/`) with search, categories, and document retrieval.

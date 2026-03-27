@@ -13,6 +13,9 @@ mcp-knowledge-server = "mcp_knowledge.server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+archive = ["boto3>=1.28"]
+semantic = ["chromadb>=0.5", "fastembed>=0.3"]
+all = ["crows-nest[archive,semantic]"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_knowledge"]
