@@ -7,7 +7,7 @@ vars to override:
 
     CROWS_NEST_HOME     — repo root (default: ~/Developer/second-brain/crows-nest)
     OBSIDIAN_VAULT      — vault root (default: ~/Developer/obsidian/MarkBrain)
-    MEDIA_ROOT          — media storage (default: ~/Media/crows-nest)
+    MEDIA_ROOT          — media storage (default: {CROWS_NEST_HOME}/media)
 
 Example systemd override:
     Environment=CROWS_NEST_HOME=/opt/crows-nest
@@ -35,7 +35,7 @@ OBSIDIAN_VAULT = os.environ.get(
 
 MEDIA_ROOT = os.environ.get(
     "MEDIA_ROOT",
-    os.path.expanduser("~/Media/crows-nest"),
+    os.path.join(CROWS_NEST_HOME, "media"),
 )
 
 # ---------------------------------------------------------------------------
