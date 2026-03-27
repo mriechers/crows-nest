@@ -895,19 +895,25 @@ def process_video(
     video_file = None
     if not transcript_path:
         # 3a: Try full video download first (mp4 preferred)
-        vid_result = subprocess.run(
-            [
-                "yt-dlp",
-                "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "--merge-output-format", "mp4",
-                "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
-                url,
-            ],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            vid_result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                    "--merge-output-format", "mp4",
+                    "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
+                    url,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("link %d: video download timed out after 600s, "
+                           "falling back to audio-only download", link_id)
+            vid_result = None
 
-        if vid_result.returncode == 0:
+        if vid_result is not None and vid_result.returncode == 0:
             # Find the downloaded video file
             for name in os.listdir(media_dir):
                 if name.endswith((".mp4", ".mkv", ".webm")):
