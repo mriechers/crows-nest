@@ -1,5 +1,6 @@
 """Configuration constants — edit these when forking for your domain."""
 
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -38,3 +39,35 @@ TITLE_FULL_MATCH_BOOST = 50
 
 # Score boost per individual query term that appears in a document's title.
 TITLE_TERM_BOOST = 10
+
+# ---------------------------------------------------------------------------
+# Media archive
+# ---------------------------------------------------------------------------
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Path to the media archive directory (pipeline output)
+MEDIA_ROOT = os.environ.get(
+    "CROWS_NEST_MEDIA_ROOT",
+    str(_PROJECT_ROOT / "media"),
+)
+
+# ---------------------------------------------------------------------------
+# Semantic search
+# ---------------------------------------------------------------------------
+
+SEMANTIC_DATA_DIR = os.environ.get(
+    "CROWS_NEST_SEMANTIC_DATA",
+    str(Path(os.path.expanduser("~/.local/share/crows-nest/data/chroma"))),
+)
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+
+# ---------------------------------------------------------------------------
+# HTTP API
+# ---------------------------------------------------------------------------
+
+ENABLE_HTTP_API = os.environ.get(
+    "CROWS_NEST_HTTP_API", "false"
+).lower() in ("true", "1", "yes")
+HTTP_PORT = int(os.environ.get("CROWS_NEST_HTTP_PORT", "27185"))
+HTTP_HOST = os.environ.get("CROWS_NEST_HTTP_HOST", "127.0.0.1")
