@@ -17,6 +17,25 @@ from . import config, knowledge
 
 mcp = FastMCP(config.SERVER_NAME)
 
+_semantic_index = None
+
+
+def _get_semantic_index():
+    """Lazy-init the semantic index. Returns None if deps not installed."""
+    global _semantic_index
+    if _semantic_index is None:
+        try:
+            from .embeddings import EmbeddingProvider
+            from .semantic import SemanticIndex
+            provider = EmbeddingProvider(model_name=config.EMBEDDING_MODEL)
+            _semantic_index = SemanticIndex(
+                data_path=config.SEMANTIC_DATA_DIR,
+                embedding_provider=provider,
+            )
+        except ImportError:
+            pass
+    return _semantic_index
+
 
 # ---------------------------------------------------------------------------
 # Tools
@@ -107,6 +126,46 @@ def get_server_info() -> dict:
     }
 
 
+@mcp.tool()
+def semantic_search(
+    query: str,
+    n_results: int = 10,
+    platform: str | None = None,
+) -> list[dict]:
+    """Search media archive transcripts using semantic similarity.
+
+    Args:
+        query: Natural language search query
+        n_results: Max results to return (default 10)
+        platform: Optional filter by platform (YouTube, TikTok, etc.)
+    """
+    index = _get_semantic_index()
+    if index is None:
+        return [{"error": "Semantic search not available — install with pip install -e '.[semantic]'"}]
+    return index.search(query=query, n_results=n_results, platform=platform)
+
+
+@mcp.tool()
+def reindex_media() -> dict:
+    """Reindex the media archive for semantic search."""
+    index = _get_semantic_index()
+    if index is None:
+        return {"error": "Semantic search not available"}
+    from .media_loader import load_media_documents
+    docs = load_media_documents(config.MEDIA_ROOT)
+    count = index.index_documents(docs)
+    return {"indexed": count, "status": "complete"}
+
+
+@mcp.tool()
+def media_status() -> dict:
+    """Get semantic search index status."""
+    index = _get_semantic_index()
+    if index is None:
+        return {"status": "unavailable", "reason": "semantic deps not installed"}
+    return index.get_status()
+
+
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
@@ -140,6 +199,22 @@ def get_knowledge_document(path: str) -> str:
 
 
 def main() -> None:
+    if config.ENABLE_HTTP_API:
+        import threading
+        def _run_api():
+            import asyncio
+            from .api import start_api_server
+            loop = asyncio.new_event_loop()
+            index = _get_semantic_index()
+            loop.run_until_complete(
+                start_api_server(
+                    semantic_index=index,
+                    host=config.HTTP_HOST,
+                    port=config.HTTP_PORT,
+                )
+            )
+        api_thread = threading.Thread(target=_run_api, daemon=True)
+        api_thread.start()
     mcp.run()
 
 
