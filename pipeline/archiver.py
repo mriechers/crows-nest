@@ -106,7 +106,7 @@ def _r2_key_from_media_path(media_path: str, title: str) -> str:
     Pattern: {YYYY}/{MM}/{title}.tar.gz
     Falls back to today's date if the path doesn't contain a YYYY-MM segment.
     """
-    # media_path is typically ~/Media/crows-nest/YYYY-MM/sanitized-title
+    # media_path is typically {CROWS_NEST_HOME}/media/YYYY-MM/sanitized-title
     basename = os.path.basename(media_path.rstrip("/"))
     parent = os.path.basename(os.path.dirname(media_path.rstrip("/")))
 
