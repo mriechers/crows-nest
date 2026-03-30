@@ -3,7 +3,7 @@ Archiver for the Crow's Nest pipeline.
 
 Stage 4: creates tar.gz archives of captured media directories, generates
 SHA-256 manifests, and uploads both to the crows-nest-archive R2 bucket via
-wrangler. Runs daily; processes all links with status="summarized".
+boto3 (S3-compatible). Runs daily; processes all links with status="summarized".
 """
 
 import argparse
@@ -11,12 +11,15 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import tarfile
 import tempfile
 from datetime import datetime, timezone
 
+import boto3
+from botocore.config import Config as BotoConfig
+
 from db import DB_PATH, claim_link, get_pending, log_processing, update_status
+from keychain_secrets import get_secret
 from utils import setup_logging
 
 logger = setup_logging("crows-nest.archiver")
@@ -65,43 +68,30 @@ def create_archive(media_dir: str, output_path: str) -> list[dict]:
     return inventory
 
 
-def upload_to_r2(local_path: str, r2_key: str) -> bool:
-    """Upload local_path to R2 at {R2_BUCKET}/{r2_key} via wrangler.
+def get_r2_client():
+    """Create an S3-compatible client for Cloudflare R2."""
+    endpoint = get_secret("R2_ENDPOINT_URL", required=True)
+    access_key = get_secret("R2_ACCESS_KEY_ID", required=True)
+    secret_key = get_secret("R2_SECRET_ACCESS_KEY", required=True)
 
-    Returns True on success, False on failure.
-    """
-    cmd = [
-        "wrangler",
-        "r2",
-        "object",
-        "put",
-        f"{R2_BUCKET}/{r2_key}",
-        "--file",
-        local_path,
-        "--storage-class",
-        "InfrequentAccess",
-    ]
-    logger.info("uploading %s -> r2://%s/%s", local_path, R2_BUCKET, r2_key)
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        config=BotoConfig(retries={"max_attempts": 3, "mode": "adaptive"}),
+    )
+
+
+def upload_to_r2(local_path: str, r2_key: str) -> bool:
+    """Upload a file to R2. Returns True on success."""
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode == 0:
-            logger.info("upload succeeded: %s", r2_key)
-            return True
-        else:
-            logger.error(
-                "wrangler exited %d: %s", result.returncode, result.stderr.strip()
-            )
-            return False
-    except subprocess.TimeoutExpired:
-        logger.error("upload timed out: %s", r2_key)
-        return False
-    except Exception as exc:
-        logger.error("upload error for %s: %s", r2_key, exc)
+        client = get_r2_client()
+        client.upload_file(local_path, R2_BUCKET, r2_key)
+        logger.info("Uploaded %s -> r2://%s/%s", local_path, R2_BUCKET, r2_key)
+        return True
+    except Exception as e:
+        logger.error("R2 upload failed for %s: %s", r2_key, e)
         return False
 
 
@@ -116,7 +106,7 @@ def _r2_key_from_media_path(media_path: str, title: str) -> str:
     Pattern: {YYYY}/{MM}/{title}.tar.gz
     Falls back to today's date if the path doesn't contain a YYYY-MM segment.
     """
-    # media_path is typically ~/Media/crows-nest/YYYY-MM/sanitized-title
+    # media_path is typically {CROWS_NEST_HOME}/media/YYYY-MM/sanitized-title
     basename = os.path.basename(media_path.rstrip("/"))
     parent = os.path.basename(os.path.dirname(media_path.rstrip("/")))
 

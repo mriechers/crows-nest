@@ -43,16 +43,33 @@ The pipeline runs on macOS and Linux. Platform-specific behavior:
 - Secrets: macOS Keychain with env var fallback — on Linux, just set env vars
 - All paths configurable via env vars in `config.py`
 
+### R2 Archival Credentials
+
+Store in macOS Keychain:
+```bash
+security add-generic-password -a "$USER" -s "developer.workspace.R2_ACCESS_KEY_ID" -w "your-key" -U
+security add-generic-password -a "$USER" -s "developer.workspace.R2_SECRET_ACCESS_KEY" -w "your-secret" -U
+security add-generic-password -a "$USER" -s "developer.workspace.R2_ENDPOINT_URL" -w "https://<account-id>.r2.cloudflarestorage.com" -U
+```
+
+Or set environment variables with the same names.
+
 ## MCP Knowledge Server
 
-Domain-specific knowledge server (`src/mcp_knowledge/`) with search, categories, and document retrieval.
+Domain-specific knowledge server (`src/mcp_knowledge/`) with keyword search over curated docs and semantic search over media archive transcripts.
 
-### Available Tools
+### Keyword Search Tools
 
 - `search_knowledge(query, category?, max_results=5, full_document=False)` — keyword search with excerpts
 - `list_topics()` — categories with document counts
 - `get_document(path)` — fetch full document by path
 - `get_server_info()` — server metadata
+
+### Semantic Search Tools (requires `pip install -e ".[semantic]"`)
+
+- `semantic_search(query, n_results=10, platform?)` — search media archive transcripts via natural language
+- `reindex_media()` — rebuild semantic index from media archive
+- `media_status()` — semantic index health: document count, collection info
 
 ### Knowledge Structure
 
@@ -66,3 +83,41 @@ knowledge/
 ```
 
 To add knowledge: add to `sources.json` and run `python scripts/crawl_docs.py`, or manually create `.md` files.
+
+### Media Archive
+
+Pipeline output stored in `media/` (gitignored). Structure:
+```
+media/
+  YYYY-MM/
+    item-title/
+      metadata.json     # Rich metadata (title, creator, platform, url, etc.)
+      item-title.txt    # Whisper transcript
+      item-title.mp4    # Video file (when available)
+      item-title.m4a    # Audio file
+```
+
+### HTTP API
+
+Optional localhost HTTP API. Enable via `CROWS_NEST_HTTP_API=true` env var.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/search` | POST | Combined semantic + keyword search (`{query, n_results?, platform?}`) |
+| `/status` | GET | Index health dashboard |
+| `/reindex` | POST | Trigger media archive reindex |
+| `/health` | GET | Liveness check |
+
+Default port: 27185. Override: `CROWS_NEST_HTTP_PORT`.
+
+## Development
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"              # base + tests
+pip install -e ".[semantic]"         # + ChromaDB, fastembed
+pip install -e ".[archive]"          # + boto3 for R2
+pip install -e ".[all]"              # everything
+pytest tests/
+```
