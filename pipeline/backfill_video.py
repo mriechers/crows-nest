@@ -28,12 +28,15 @@ _SIZE_ESTIMATES_MB = {
 R2_COST_PER_GB_MONTH = 0.015
 
 
-def query_candidates(db_path: str, limit: int | None = None) -> list[dict]:
+def query_candidates(
+    db_path: str, limit: int | None = None, skip_podcasts: bool = False,
+) -> list[dict]:
     """Return links that have audio but no video."""
-    sql = """
+    content_types = "('youtube', 'social_video')" if skip_podcasts else "('youtube', 'social_video', 'podcast')"
+    sql = f"""
         SELECT id, url, content_type, download_path, status
         FROM links
-        WHERE content_type IN ('youtube', 'social_video', 'podcast')
+        WHERE content_type IN {content_types}
           AND download_path IS NOT NULL
           AND download_path != ''
           AND (video_path IS NULL OR video_path = '')
@@ -119,9 +122,13 @@ def main() -> None:
         metavar="PATH",
         help=f"Database path (default: {DB_PATH})",
     )
+    parser.add_argument(
+        "--skip-podcasts", action="store_true",
+        help="Skip podcast items (they rarely have video formats)",
+    )
     args = parser.parse_args()
 
-    candidates = query_candidates(args.db, args.limit)
+    candidates = query_candidates(args.db, args.limit, skip_podcasts=args.skip_podcasts)
 
     if not candidates:
         print("No candidates found. Nothing to do.")
