@@ -150,7 +150,10 @@ def main() -> None:
     for i, row in enumerate(candidates, 1):
         link_id = row["id"]
         url = row["url"]
+        # download_path may be a file path (e.g., .../title.m4a) — use its parent dir
         media_dir = row["download_path"]
+        if media_dir and not os.path.isdir(media_dir):
+            media_dir = os.path.dirname(media_dir)
 
         print(f"[{i}/{len(candidates)}] {url}... ", end="", flush=True)
 
