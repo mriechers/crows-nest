@@ -48,7 +48,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Path to the media archive directory (pipeline output)
 MEDIA_ROOT = os.environ.get(
-    "CROWS_NEST_MEDIA_ROOT",
+    "MEDIA_ROOT",
     str(_PROJECT_ROOT / "media"),
 )
 

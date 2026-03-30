@@ -22,29 +22,41 @@ def create_api(semantic_index, knowledge_base=None) -> Starlette:
     """Create the HTTP API application."""
 
     async def search(request: Request) -> JSONResponse:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
         query = body.get("query")
         if not query:
             return JSONResponse({"error": "query is required"}, status_code=400)
         n_results = body.get("n_results", 10)
         platform = body.get("platform")
 
-        # Semantic search over media archive
-        semantic_results = await asyncio.to_thread(
-            semantic_index.search, query=query, n_results=n_results, platform=platform,
-        )
-
-        # Keyword search over knowledge base (if available)
-        keyword_results = []
-        if knowledge_base:
-            keyword_results = await asyncio.to_thread(
-                knowledge_base.search_knowledge, query=query, max_results=n_results,
+        try:
+            # Semantic search over media archive
+            semantic_results = await asyncio.to_thread(
+                semantic_index.search, query=query, n_results=n_results, platform=platform,
             )
 
-        return JSONResponse({"results": semantic_results + keyword_results})
+            # Keyword search over knowledge base (if available)
+            keyword_results = []
+            if knowledge_base:
+                keyword_results = await asyncio.to_thread(
+                    knowledge_base.search_knowledge, query=query, max_results=n_results,
+                )
+
+            return JSONResponse({"results": semantic_results + keyword_results})
+        except Exception as exc:
+            logger.exception("Search failed")
+            return JSONResponse({"error": str(exc)}, status_code=500)
 
     async def status(request: Request) -> JSONResponse:
-        semantic_status = await asyncio.to_thread(semantic_index.get_status)
+        try:
+            semantic_status = await asyncio.to_thread(semantic_index.get_status)
+        except Exception as exc:
+            logger.exception("Status check failed")
+            return JSONResponse({"error": str(exc)}, status_code=500)
         return JSONResponse({"semantic": semantic_status, "service": "crows-nest"})
 
     async def reindex(request: Request) -> JSONResponse:

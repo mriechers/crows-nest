@@ -169,7 +169,8 @@ def main() -> None:
             continue
 
         if result.returncode != 0:
-            print("Failed to download video")
+            reason = result.stderr.strip()[:200] if result.stderr else "unknown error"
+            print(f"Failed to download video: {reason}")
             failed += 1
             continue
 

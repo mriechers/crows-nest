@@ -10,8 +10,11 @@ When forking, you should rarely need to edit this file. Customization points:
 from __future__ import annotations
 
 import json
+import logging
 
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger("mcp_knowledge.server")
 
 from . import config, knowledge
 
@@ -32,8 +35,8 @@ def _get_semantic_index():
                 data_path=config.SEMANTIC_DATA_DIR,
                 embedding_provider=provider,
             )
-        except ImportError:
-            pass
+        except ImportError as exc:
+            logger.warning("Semantic search unavailable (missing deps): %s", exc)
     return _semantic_index
 
 
@@ -200,21 +203,27 @@ def get_knowledge_document(path: str) -> str:
 
 def main() -> None:
     if config.ENABLE_HTTP_API:
-        import threading
-        def _run_api():
-            import asyncio
-            from .api import start_api_server
-            loop = asyncio.new_event_loop()
-            index = _get_semantic_index()
-            loop.run_until_complete(
-                start_api_server(
-                    semantic_index=index,
-                    host=config.HTTP_HOST,
-                    port=config.HTTP_PORT,
-                )
-            )
-        api_thread = threading.Thread(target=_run_api, daemon=True)
-        api_thread.start()
+        index = _get_semantic_index()
+        if index is None:
+            logger.warning("HTTP API requires semantic deps; skipping API start")
+        else:
+            import threading
+            def _run_api():
+                try:
+                    import asyncio
+                    from .api import start_api_server
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(
+                        start_api_server(
+                            semantic_index=index,
+                            host=config.HTTP_HOST,
+                            port=config.HTTP_PORT,
+                        )
+                    )
+                except Exception:
+                    logger.exception("HTTP API thread failed to start")
+            api_thread = threading.Thread(target=_run_api, daemon=True)
+            api_thread.start()
     mcp.run()
 
 
