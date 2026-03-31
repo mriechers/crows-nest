@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+<head>
+  <title>My feeds</title>
+</head>
+<body>
+<outline text="Feeds" title="Feeds">
+  <outline title="The Daily"  type="rss" xmlUrl="https://rss.art19.com/the-daily" />
+  <outline title="404 Media"  type="rss" xmlUrl="https://www.404media.co/rss/" />
+  <outline title="Bloody Disgusting!"  type="rss" xmlUrl="https://bloody-disgusting.com/feed/" />
+  <outline title="Daring Fireball"  type="rss" xmlUrl="https://daringfireball.net/feeds/json" />
+  <outline title="Minnesota Reformer"  type="rss" xmlUrl="https://minnesotareformer.com/feed/" />
+  <outline title="Jason Schreier -"  type="rss" xmlUrl="https://www.bloomberg.com/authors/AUvqMRVAZCw/jason-schreier.rss" />
+  <outline title="MinnPost"  type="rss" xmlUrl="https://www.minnpost.com/feed/" />
+  <outline title="NYT > Health"  type="rss" xmlUrl="https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/section/health/rss.xml" />
+  <outline title="NYT > Science"  type="rss" xmlUrl="https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/section/science/rss.xml" />
+  <outline title="NYT > Technology"  type="rss" xmlUrl="https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/section/technology/rss.xml" />
+  <outline title="NYT > Top Stories"  type="rss" xmlUrl="https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml" />
+  <outline title="NYT > What to Watch"  type="rss" xmlUrl="https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/spotlight/what-to-watch/rss.xml" />
+  <outline title="Paul Tassi"  type="rss" xmlUrl="https://www.forbes.com/sites/paultassi/feed/" />
+  <outline title="Platformer"  type="rss" xmlUrl="https://www.platformer.news/rss/" />
+  <outline title="Polygon -  All"  type="rss" xmlUrl="https://www.polygon.com/rss/index.xml" />
+  <outline title="Racket"  type="rss" xmlUrl="https://racketmn.com/feed/" />
+  <outline title="Techmeme"  type="rss" xmlUrl="https://www.techmeme.com/feed.xml" />
+  <outline title="The Verge -  All Posts"  type="rss" xmlUrl="http://theverge.com/rss/index.xml" />
+  <outline title="Wisconsin Public Radio - Agriculture"  type="rss" xmlUrl="https://www.wpr.org/taxonomy/term/10865/feed" />
+  <outline title="Wisconsin Public Radio - Economy"  type="rss" xmlUrl="https://www.wpr.org/taxonomy/term/10251/feed" />
+  <outline title="Wisconsin Public Radio - Environment"  type="rss" xmlUrl="https://www.wpr.org/taxonomy/term/10287/feed" />
+  <outline title="Wisconsin Public Radio - Politics"  type="rss" xmlUrl="http://www.wpr.org/taxonomy/term/10228/feed" />
+  <outline title="PBS Wisconsin"  type="rss" xmlUrl="https://pbswisconsin.org/feed/" />
+  <outline title="Homepage - MPR News"  type="rss" xmlUrl="https://www.mprnews.org/feed/homepage" />
+  <outline title="Updraft® - MPR News"  type="rss" xmlUrl="http://feeds.feedburner.com/UpdraftMPR" />
+  <outline title="Minnesota Today"  type="rss" xmlUrl="https://feeds.publicradio.org/public_feeds/mpr-news-update/rss/rss" />
+  <outline title="Politics and Government - MPR News"  type="rss" xmlUrl="http://feeds.mpr.org/MPR_Politics" />
+  <outline title="Business &amp; Economy - MPR News"  type="rss" xmlUrl="http://feeds.mpr.org/MPR_Business" />
+</outline>
+</body>
+</opml>
