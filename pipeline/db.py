@@ -7,9 +7,12 @@ for the links table (status-machine) and processing_log table.
 
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from config import DB_PATH
+try:
+    from pipeline.config import DB_PATH
+except ImportError:
+    from config import DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS links (
@@ -63,6 +66,40 @@ CREATE INDEX IF NOT EXISTS idx_signal_messages_sender ON signal_messages(sender)
 CREATE INDEX IF NOT EXISTS idx_signal_messages_received_at ON signal_messages(received_at);
 """
 
+RSS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS feeds (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    url             TEXT NOT NULL UNIQUE,
+    title           TEXT,
+    tier            INTEGER NOT NULL DEFAULT 2,
+    category        TEXT,
+    active          INTEGER NOT NULL DEFAULT 1,
+    added_at        TEXT NOT NULL,
+    last_fetched_at TEXT,
+    last_error      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS articles (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id       INTEGER NOT NULL REFERENCES feeds(id),
+    guid          TEXT NOT NULL UNIQUE,
+    title         TEXT,
+    url           TEXT,
+    summary       TEXT,
+    author        TEXT,
+    published_at  TEXT,
+    fetched_at    TEXT NOT NULL,
+    score         REAL NOT NULL DEFAULT 0.0,
+    surfaced      INTEGER NOT NULL DEFAULT 0,
+    surfaced_date TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_articles_score ON articles(score);
+CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at);
+CREATE INDEX IF NOT EXISTS idx_articles_surfaced ON articles(surfaced);
+CREATE INDEX IF NOT EXISTS idx_feeds_active ON feeds(active);
+"""
+
 
 def _now() -> str:
     """Return current UTC timestamp as ISO 8601 string."""
@@ -75,6 +112,7 @@ def init_db(db_path: str = DB_PATH) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        conn.executescript(RSS_SCHEMA)
         conn.commit()
         # Migrate existing databases: add video_path if missing
         try:
@@ -220,5 +258,167 @@ def claim_link(
         )
         conn.commit()
         return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# RSS feed and article functions
+# ---------------------------------------------------------------------------
+
+
+def add_feed(
+    url: str,
+    title: str = None,
+    tier: int = 2,
+    category: str = None,
+    db_path: str = DB_PATH,
+) -> int:
+    """
+    Insert a new feed. Returns the rowid.
+    Deduplicates by URL — if the feed already exists, returns its existing ID
+    without modifying it.
+    """
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO feeds (url, title, tier, category, added_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (url, title, tier, category, _now()),
+        )
+        conn.commit()
+        if cursor.lastrowid and cursor.lastrowid > 0 and cursor.rowcount == 1:
+            return cursor.lastrowid
+        # Row already existed — fetch the existing id
+        cursor = conn.execute("SELECT id FROM feeds WHERE url = ?", (url,))
+        return cursor.fetchone()["id"]
+    finally:
+        conn.close()
+
+
+def list_feeds(
+    active_only: bool = True,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Return all feeds, optionally filtering to active ones only."""
+    conn = get_connection(db_path)
+    try:
+        query = "SELECT * FROM feeds"
+        params: tuple = ()
+        if active_only:
+            query += " WHERE active = 1"
+        query += " ORDER BY added_at ASC"
+        cursor = conn.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def add_article(
+    feed_id: int,
+    guid: str,
+    title: str,
+    url: str,
+    summary: str,
+    published_at: str,
+    score: float = 0.0,
+    author: str = None,
+    db_path: str = DB_PATH,
+) -> int | None:
+    """
+    Insert a new article. Returns the rowid, or None if the guid already exists.
+    Deduplicates by guid — duplicate guids are silently ignored.
+    """
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO articles
+                (feed_id, guid, title, url, summary, author, published_at, fetched_at, score)
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (feed_id, guid, title, url, summary, author, published_at, _now(), score),
+        )
+        conn.commit()
+        if cursor.rowcount == 1:
+            return cursor.lastrowid
+        return None
+    finally:
+        conn.close()
+
+
+def get_top_articles(
+    limit: int = 8,
+    max_age_days: int = 2,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """
+    Return unsurfaced articles ordered by score descending.
+    Only includes articles whose published_at is within max_age_days of now.
+    Joins with feeds to include feed title and tier.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            SELECT
+                a.*,
+                f.title AS feed_title,
+                f.tier  AS feed_tier
+            FROM articles a
+            JOIN feeds f ON f.id = a.feed_id
+            WHERE a.surfaced = 0
+              AND a.published_at >= ?
+            ORDER BY a.score DESC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def mark_articles_surfaced(
+    article_ids: list[int],
+    db_path: str = DB_PATH,
+) -> None:
+    """Mark the given article IDs as surfaced so they are excluded from future queries."""
+    if not article_ids:
+        return
+    now = _now()
+    placeholders = ", ".join("?" for _ in article_ids)
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            f"UPDATE articles SET surfaced = 1, surfaced_date = ? WHERE id IN ({placeholders})",
+            [now] + list(article_ids),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def expire_old_articles(
+    max_age_days: int = 14,
+    db_path: str = DB_PATH,
+) -> int:
+    """
+    Delete articles older than max_age_days based on published_at.
+    Returns the number of rows deleted.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            "DELETE FROM articles WHERE published_at < ?",
+            (cutoff,),
+        )
+        conn.commit()
+        return cursor.rowcount
     finally:
         conn.close()
