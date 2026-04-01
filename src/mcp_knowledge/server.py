@@ -234,7 +234,7 @@ def search_articles(query: str, max_results: int = 10) -> list[dict]:
         pattern = f"%{query.lower()}%"
         rows = conn.execute(
             """SELECT a.id, a.title, a.url, a.summary, a.score, a.published_at,
-                      a.surfaced, f.title AS source, f.tier
+                      a.surfaced, f.title AS feed_title, f.tier AS feed_tier
                FROM articles a
                JOIN feeds f ON a.feed_id = f.id
                WHERE (LOWER(a.title) LIKE ? OR LOWER(a.summary) LIKE ?)
