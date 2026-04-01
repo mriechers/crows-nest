@@ -122,3 +122,29 @@ def test_expire_old_articles(tmp_path):
     articles = get_top_articles(limit=10, db_path=db_path)
     assert len(articles) == 1
     assert articles[0]["title"] == "New News"
+
+
+def test_add_article_deduplicates_by_guid(tmp_path):
+    """Inserting the same GUID twice returns None the second time."""
+    db_path = str(tmp_path / "test.db")
+    init_db(db_path)
+
+    feed_id = add_feed(url="https://example.com/feed.xml", title="Feed", tier=1, db_path=db_path)
+
+    result1 = add_article(
+        feed_id=feed_id, guid="same-guid", title="Article",
+        url="https://example.com/1", summary="",
+        published_at="2026-03-31T10:00:00+00:00", score=5.0, db_path=db_path,
+    )
+    assert result1 is not None
+
+    result2 = add_article(
+        feed_id=feed_id, guid="same-guid", title="Article Duplicate",
+        url="https://example.com/2", summary="Different",
+        published_at="2026-03-31T11:00:00+00:00", score=6.0, db_path=db_path,
+    )
+    assert result2 is None
+
+    articles = get_top_articles(limit=10, max_age_days=30, db_path=db_path)
+    assert len(articles) == 1
+    assert articles[0]["title"] == "Article"
