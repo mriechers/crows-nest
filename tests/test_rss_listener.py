@@ -82,3 +82,33 @@ def test_fetch_feed_parses_entries(tmp_path):
     assert len(articles) == 1
     assert articles[0]["title"] == "Test Article"
     assert "<p>" not in articles[0]["summary"]
+
+
+def test_fetch_feed_handles_bozo_feed(tmp_path):
+    """Bozo feeds log a warning but still process valid entries."""
+    db_path = str(tmp_path / "test.db")
+    init_db(db_path)
+
+    feed_id = add_feed(url="https://example.com/bad.xml", title="Bad Feed", tier=1, db_path=db_path)
+
+    mock_feed = MagicMock()
+    mock_feed.bozo = True
+    mock_feed.bozo_exception = "not well-formed (invalid token)"
+    mock_entry = MagicMock()
+    mock_entry.get = lambda k, d=None: {
+        "id": "bozo-entry-1",
+        "title": "Still Valid Article",
+        "link": "https://example.com/valid",
+        "summary": "Fine despite feed error",
+    }.get(k, d)
+    mock_entry.published_parsed = None
+    mock_feed.entries = [mock_entry]
+
+    with patch("pipeline.rss_listener.feedparser.parse", return_value=mock_feed):
+        count = fetch_feed(feed_id, "https://example.com/bad.xml", tier=1, db_path=db_path)
+
+    assert count == 1
+    articles = get_top_articles(limit=5, max_age_days=30, db_path=db_path)
+    assert len(articles) == 1
+    assert articles[0]["title"] == "Still Valid Article"
+    assert articles[0]["score"] >= 5.0
