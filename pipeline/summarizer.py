@@ -15,9 +15,9 @@ import time
 import urllib.parse
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from config import OBSIDIAN_CLIPPINGS, OBSIDIAN_ARCHIVE
+from config import OBSIDIAN_CLIPPINGS, OBSIDIAN_ARCHIVE, OBSIDIAN_VAULT
 from db import get_pending, claim_link, update_status, log_processing
 from utils import sanitize_title, setup_logging
 from keychain_secrets import get_secret
@@ -832,6 +832,99 @@ def write_obsidian_note(title: str, frontmatter: str, body: str) -> str:
     return file_path
 
 
+# --- Weekly Links Log ---
+
+CONTENT_TYPE_SECTION_MAP = {
+    "youtube": "Videos",
+    "social_video": "Videos",
+    "web_page": "Articles",
+    "podcast": "Podcasts",
+    "audio": "Podcasts",
+    "image": "Images",
+}
+
+WEEKLY_LOG_SECTIONS = ["Videos", "Articles", "Podcasts", "Images", "Other"]
+
+WEEKLY_LOG_TEMPLATE = """---
+title: "Weekly Links — {week_label}"
+created: {created}
+week_start: {week_start}
+week_end: {week_end}
+para: inbox
+tags: [weekly-links, inbox-capture]
+---
+# Weekly Links — {week_label}
+
+## Videos
+
+## Articles
+
+## Podcasts
+
+## Images
+
+## Other
+"""
+
+
+def _append_to_weekly_log(
+    inbox_dir: str,
+    title: str,
+    url: str,
+    content_type: str,
+    source: str,
+    capture_date: date | None = None,
+) -> None:
+    """Append an entry to the current week's links log.
+
+    Creates the file from template if it doesn't exist.
+    Appends a line under the matching content-type section header.
+    """
+    from datetime import date as date_type, timedelta
+
+    if capture_date is None:
+        capture_date = date_type.today()
+
+    iso_cal = capture_date.isocalendar()
+    week_label = f"{iso_cal.year}-W{iso_cal.week:02d}"
+
+    week_start = capture_date - timedelta(days=capture_date.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    filename = f"Weekly Links \u2014 {week_label}.md"
+    filepath = os.path.join(inbox_dir, filename)
+
+    if not os.path.exists(filepath):
+        content = WEEKLY_LOG_TEMPLATE.format(
+            week_label=week_label,
+            created=week_start.isoformat(),
+            week_start=week_start.isoformat(),
+            week_end=week_end.isoformat(),
+        )
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    section = CONTENT_TYPE_SECTION_MAP.get(content_type, "Other")
+    entry_line = f"- {capture_date.isoformat()} \u2014 [[{title}]] \u00b7 [{content_type}]({url}) \u00b7 via {source}\n"
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    section_header = f"## {section}\n"
+    inserted = False
+    for i, line in enumerate(lines):
+        if line == section_header:
+            lines.insert(i + 1, entry_line)
+            inserted = True
+            break
+
+    if not inserted:
+        lines.append(entry_line)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -962,6 +1055,17 @@ def run(db_path: str) -> None:
             )
 
             note_path = write_obsidian_note(title, frontmatter, body)
+
+            try:
+                _append_to_weekly_log(
+                    inbox_dir=os.path.join(OBSIDIAN_VAULT, "0 - INBOX"),
+                    title=title,
+                    url=link["url"],
+                    content_type=link["content_type"] or "web_page",
+                    source=link.get("sender") or link.get("source_type") or "unknown",
+                )
+            except Exception as e:
+                logger.warning("Failed to append to weekly log: %s", e)
 
             update_status(
                 link_id=link_id,

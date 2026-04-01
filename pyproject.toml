@@ -15,7 +15,8 @@ mcp-knowledge-server = "mcp_knowledge.server:main"
 dev = ["pytest>=7.0", "httpx>=0.24"]
 archive = ["boto3>=1.28"]
 semantic = ["chromadb>=0.5", "fastembed>=0.3"]
-all = ["crows-nest[archive,semantic]"]
+rss = ["feedparser>=6.0", "requests>=2.31"]
+all = ["crows-nest[archive,semantic,rss]"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_knowledge"]

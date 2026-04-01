@@ -51,7 +51,7 @@ DB_PATH = os.path.join(DATA_DIR, "crows-nest.db")
 MESSAGE_LOG = os.path.join(LOG_DIR, "signal-messages.log")
 WHISPER_SCRIPT = os.path.join(SCRIPTS_DIR, "whisper-transcribe.sh")
 
-OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "0 - INBOX", "CLIPPINGS")
+OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "CLIPPINGS - Need Sorting")
 OBSIDIAN_ARCHIVE = os.path.join(OBSIDIAN_VAULT, "4 - ARCHIVE")
 
 
