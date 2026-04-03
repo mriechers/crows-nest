@@ -12,7 +12,7 @@ import sqlite3
 import subprocess
 from datetime import datetime, timezone
 
-from config import MESSAGE_LOG
+from config import MESSAGE_LOG, SIGNAL_HEALTH_FILE
 from content_types import classify_url
 from db import init_db, add_link, get_connection
 from keychain_secrets import get_secret
@@ -190,7 +190,7 @@ def _batch_image_messages(messages: list[dict]) -> tuple[list[dict], list[dict]]
     return image_batches, non_image_messages
 
 
-def receive_messages() -> list[dict]:
+def receive_messages() -> list[dict] | None:
     """Invoke signal-cli in JSON mode and return parsed messages.
 
     Calls `signal-cli -u {SIGNAL_USER} receive --timeout {RECEIVE_TIMEOUT} --json`.
@@ -200,6 +200,7 @@ def receive_messages() -> list[dict]:
         List of dicts with keys "sender_id", "sender_name", "message",
         "timestamp", "group_name", "attachments".
         Returns an empty list on any subprocess error.
+        Returns None on fatal errors (e.g. account not registered).
     """
     cmd = [
         SIGNAL_CLI,
@@ -215,6 +216,18 @@ def receive_messages() -> list[dict]:
             text=True,
             timeout=RECEIVE_TIMEOUT + 5,
         )
+        stderr = result.stderr.strip() if result.stderr else ""
+        if result.returncode != 0 and stderr:
+            if "not registered" in stderr.lower():
+                logger.critical(
+                    "signal-cli: account is NOT REGISTERED. "
+                    "Messages cannot be sent or received. "
+                    "Re-register with: signal-cli -u %s register && signal-cli -u %s verify CODE",
+                    SIGNAL_USER, SIGNAL_USER,
+                )
+                return None
+            logger.error("signal-cli exited %d: %s", result.returncode, stderr)
+            return None
         return _parse_json_output(result.stdout)
     except subprocess.TimeoutExpired as exc:
         # signal-cli writes messages to stdout as they arrive, so even
@@ -265,6 +278,22 @@ def _log_message(sender: str, body: str, group: str = "") -> None:
         logger.warning("Could not write to message log: %s", exc)
 
 
+def _write_health(status: str, error: str = "", message: str = "") -> None:
+    """Write a machine-readable health status file for the signal listener."""
+    ts = datetime.now(timezone.utc).isoformat()
+    payload = {"status": status, "timestamp": ts}
+    if error:
+        payload["error"] = error
+    if message:
+        payload["message"] = message
+    try:
+        os.makedirs(os.path.dirname(SIGNAL_HEALTH_FILE), exist_ok=True)
+        with open(SIGNAL_HEALTH_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except OSError as exc:
+        logger.warning("Could not write health file: %s", exc)
+
+
 def run(db_path: str) -> None:
     """Main entry point: receive messages, extract URLs, store, confirm.
 
@@ -280,10 +309,17 @@ def run(db_path: str) -> None:
     """
     if not SIGNAL_USER:
         logger.error("SIGNAL_USER not set (check Keychain or env var) — cannot receive messages")
+        _write_health("error", "no_signal_user", "SIGNAL_USER not configured")
         return
 
     init_db(db_path)
     messages = receive_messages()
+
+    if messages is None:
+        _write_health("error", "not_registered", f"signal-cli account {SIGNAL_USER} is not registered")
+        return
+
+    _write_health("ok")
 
     image_batches, non_image_messages = _batch_image_messages(messages)
 

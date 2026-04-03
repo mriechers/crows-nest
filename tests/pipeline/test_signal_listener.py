@@ -3,6 +3,7 @@
 import json
 import sys
 import os
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../pipeline"))
 
@@ -10,6 +11,8 @@ from signal_listener import (
     parse_signal_message,
     _parse_json_output,
     _batch_image_messages,
+    receive_messages,
+    _write_health,
 )
 
 
@@ -238,3 +241,68 @@ def test_mixed_messages_separated():
     assert len(batches) == 1
     assert len(non_image) == 1
     assert "https://example.com" in non_image[0]["message"]
+
+
+# --- receive_messages: fatal error detection ---
+
+@patch("signal_listener.subprocess.run")
+def test_receive_returns_none_when_not_registered(mock_run):
+    """signal-cli 'not registered' error returns None (fatal)."""
+    mock_run.return_value = MagicMock(
+        returncode=1,
+        stdout="",
+        stderr="User +16124706803 is not registered.",
+    )
+    result = receive_messages()
+    assert result is None
+
+
+@patch("signal_listener.subprocess.run")
+def test_receive_returns_none_on_other_fatal_error(mock_run):
+    """Non-zero exit with stderr returns None."""
+    mock_run.return_value = MagicMock(
+        returncode=1,
+        stdout="",
+        stderr="Some other fatal error from signal-cli",
+    )
+    result = receive_messages()
+    assert result is None
+
+
+@patch("signal_listener.subprocess.run")
+def test_receive_returns_list_on_success(mock_run):
+    """Successful signal-cli invocation returns a list (possibly empty)."""
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="",
+        stderr="",
+    )
+    result = receive_messages()
+    assert result == []
+
+
+# --- _write_health ---
+
+def test_write_health_creates_file(tmp_path):
+    """Health file is written with correct structure."""
+    health_file = str(tmp_path / "signal-health.json")
+    with patch("signal_listener.SIGNAL_HEALTH_FILE", health_file):
+        _write_health("error", "not_registered", "account not registered")
+
+    with open(health_file) as f:
+        data = json.load(f)
+    assert data["status"] == "error"
+    assert data["error"] == "not_registered"
+    assert "timestamp" in data
+
+
+def test_write_health_ok(tmp_path):
+    """OK health status has no error fields."""
+    health_file = str(tmp_path / "signal-health.json")
+    with patch("signal_listener.SIGNAL_HEALTH_FILE", health_file):
+        _write_health("ok")
+
+    with open(health_file) as f:
+        data = json.load(f)
+    assert data["status"] == "ok"
+    assert "error" not in data
