@@ -2,7 +2,7 @@
 Archiver for the Crow's Nest pipeline.
 
 Stage 4: creates tar.gz archives of captured media directories, generates
-SHA-256 manifests, and uploads both to the crows-nest-archive R2 bucket via
+SHA-256 manifests, and uploads both to the crows-nest-media-archive R2 bucket via
 boto3 (S3-compatible). Runs daily; processes all links with status="summarized".
 """
 
@@ -24,7 +24,7 @@ from utils import setup_logging
 
 logger = setup_logging("crows-nest.archiver")
 
-R2_BUCKET = "crows-nest-archive"
+R2_BUCKET = "crows-nest-media-archive"
 
 
 # ---------------------------------------------------------------------------

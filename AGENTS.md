@@ -11,7 +11,7 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 1. **Listener** (`pipeline/signal_listener.py`) — polls signal-cli every 5 min, extracts URLs and image batches, saves to SQLite
 2. **Processor** (`pipeline/processor.py`) — downloads media, transcribes audio/video with Whisper, scrapes web pages
 3. **Summarizer** (`pipeline/summarizer.py`) — calls Claude Haiku via OpenRouter for structured analysis, writes Obsidian notes to `0 - INBOX/Clippings/`
-4. **Archiver** (`pipeline/archiver.py`) — tar.gz + SHA-256 manifest → Cloudflare R2 (`crows-nest-archive` bucket)
+4. **Archiver** (`pipeline/archiver.py`) — tar.gz + SHA-256 manifest → Cloudflare R2 (`crows-nest-media-archive` bucket)
 
 ### Key files
 
