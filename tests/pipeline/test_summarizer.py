@@ -117,3 +117,20 @@ def test_generate_note_content_image_no_extracted_text():
     )
     assert "![[20260319-130000-1.jpg]]" in result
     assert "## Extracted Text" not in result  # No section when empty
+
+
+def test_generate_note_content_full_transcript_not_truncated():
+    """Transcripts longer than 2000 chars must appear in full (issue #17)."""
+    long_transcript = "word " * 5000  # ~25,000 chars
+    result = generate_note_content(
+        title="Long Podcast",
+        source_url="https://example.com/podcast",
+        content_type="podcast",
+        summary="A long podcast episode.",
+        key_points=["Point one"],
+        transcript_text=long_transcript,
+        metadata={},
+    )
+    assert long_transcript.strip() in result
+    assert "truncated" not in result
+    assert "<details>" in result

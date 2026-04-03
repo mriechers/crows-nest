@@ -247,16 +247,11 @@ def generate_note_content(
     sections.append("---\n\n## Source Details\n\n" + "\n".join(source_lines))
 
     # Transcript (collapsed) — skipped for image content
+    # Full transcript preserved; the <details> block handles readability.
     if transcript_text and content_type != "image":
-        truncated = transcript_text[:2000]
-        truncation_notice = (
-            "\n\n*(transcript truncated at 2000 chars)*"
-            if len(transcript_text) > 2000
-            else ""
-        )
         sections.append(
             f"<details><summary>Full Transcript</summary>\n\n"
-            f"{truncated}{truncation_notice}\n\n</details>"
+            f"{transcript_text}\n\n</details>"
         )
 
     return "\n\n".join(sections)
