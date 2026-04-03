@@ -14,7 +14,9 @@ from datetime import datetime, timezone
 # Allow running directly from any working directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import LOG_DIR
+import json
+
+from config import LOG_DIR, SIGNAL_HEALTH_FILE
 from db import DB_PATH, get_connection, init_db
 
 
@@ -183,6 +185,41 @@ def check_log_freshness() -> list[str]:
     return problems
 
 
+def check_signal_health() -> list[str]:
+    """Check signal-cli health from the listener's health status file."""
+    problems = []
+    if not os.path.exists(SIGNAL_HEALTH_FILE):
+        problems.append("signal-cli: health file missing (listener may not have run yet)")
+        return problems
+    try:
+        with open(SIGNAL_HEALTH_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        problems.append(f"signal-cli: could not read health file ({exc})")
+        return problems
+
+    status = data.get("status")
+    if status == "error":
+        error_type = data.get("error", "unknown")
+        message = data.get("message", "")
+        problems.append(f"signal-cli: {error_type} — {message}")
+    elif status == "ok":
+        ts_str = data.get("timestamp", "")
+        if ts_str:
+            try:
+                last_ok = datetime.fromisoformat(ts_str)
+                age_minutes = (datetime.now(timezone.utc) - last_ok).total_seconds() / 60
+                if age_minutes > 15:
+                    hours = int(age_minutes // 60)
+                    mins = int(age_minutes % 60)
+                    problems.append(
+                        f"signal-cli: last OK {hours}h{mins}m ago (threshold 15m)"
+                    )
+            except ValueError:
+                pass
+    return problems
+
+
 def print_health() -> bool:
     """Run all health checks, print results, return True if healthy."""
     all_ok = True
@@ -211,6 +248,17 @@ def print_health() -> bool:
             print(f"    WARN  {p}")
     else:
         print("  Log freshness:    OK (all logs recently updated)")
+
+    print()
+
+    signal_problems = check_signal_health()
+    if signal_problems:
+        all_ok = False
+        print("  Signal listener check:")
+        for p in signal_problems:
+            print(f"    FAIL  {p}")
+    else:
+        print("  Signal listener:  OK (signal-cli healthy)")
 
     print()
     if all_ok:
