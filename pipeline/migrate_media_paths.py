@@ -56,8 +56,7 @@ def migrate(db_path: str, dry_run: bool = False) -> int:
     Returns the number of rows whose paths were updated.
     """
     if not os.path.exists(db_path):
-        print(f"Database not found: {db_path}", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError(f"Database not found: {db_path}")
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -125,7 +124,11 @@ def main() -> None:
         print("Mode: dry-run (no changes will be written)")
     print()
 
-    count = migrate(args.db, dry_run=args.dry_run)
+    try:
+        count = migrate(args.db, dry_run=args.dry_run)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
 
     if args.dry_run:
         print(f"\n{count} row(s) would be updated.")
