@@ -13,7 +13,36 @@ from signal_listener import (
     _batch_image_messages,
     receive_messages,
     _write_health,
+    resolve_sender,
 )
+
+
+# --- resolve_sender ---
+
+def test_resolve_sender_prefers_name():
+    assert resolve_sender("+16085551234", "Alice") == "Alice"
+
+def test_resolve_sender_falls_back_to_phone():
+    assert resolve_sender("+16085551234", "") == "+16085551234"
+
+def test_resolve_sender_none_name():
+    assert resolve_sender("+16085551234", None) == "+16085551234"
+
+def test_resolve_sender_whitespace_only():
+    assert resolve_sender("+16085551234", "   ") == "+16085551234"
+
+def test_resolve_sender_strips_whitespace():
+    assert resolve_sender("+16085551234", "  Bob  ") == "Bob"
+
+def test_resolve_sender_phone_echo():
+    """When Signal echoes the phone number as the name, use the phone."""
+    assert resolve_sender("+16085551234", "+16085551234") == "+16085551234"
+
+def test_resolve_sender_both_empty():
+    assert resolve_sender("", "") == ""
+
+def test_resolve_sender_name_no_phone():
+    assert resolve_sender("", "Alice") == "Alice"
 
 
 # --- parse_signal_message (unchanged) ---
