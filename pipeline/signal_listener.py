@@ -26,6 +26,18 @@ RECEIVE_TIMEOUT = 15
 SIGNAL_ATTACHMENTS_DIR = os.path.expanduser("~/.local/share/signal-cli/attachments")
 
 
+def resolve_sender(sender_id: str, sender_name: str | None) -> str:
+    """Prefer Signal display name over raw phone number.
+
+    Falls back to sender_id (phone number) when sender_name is empty,
+    whitespace-only, or is just the phone number echoed back.
+    """
+    name = (sender_name or "").strip()
+    if not name or name == sender_id:
+        return sender_id
+    return name
+
+
 def parse_signal_message(message: str | None) -> dict:
     """Extract URLs and context from a Signal message body.
 
@@ -327,11 +339,12 @@ def run(db_path: str) -> None:
     for msg in non_image_messages:
         sender_id = msg["sender_id"]
         sender_name = msg.get("sender_name", "")
+        sender_display = resolve_sender(sender_id, sender_name)
         body = msg["message"]
         group = msg.get("group_name", "")
 
         # Log every message for reference
-        _log_message(sender_id, body, group)
+        _log_message(sender_display, body, group)
 
         # Extract URLs for the pipeline
         parsed = parse_signal_message(body)
@@ -342,7 +355,7 @@ def run(db_path: str) -> None:
             conn = get_connection(db_path)
             conn.execute(
                 "INSERT INTO signal_messages (sender, body, group_name, has_urls) VALUES (?, ?, ?, ?)",
-                (sender_id, body, group or None, has_urls),
+                (sender_display, body, group or None, has_urls),
             )
             conn.commit()
             conn.close()
@@ -355,12 +368,12 @@ def run(db_path: str) -> None:
                 add_link(
                     url=url,
                     source_type="signal",
-                    sender=sender_id,
+                    sender=sender_display,
                     context=parsed["context"],
                     content_type=content_type,
                     db_path=db_path,
                 )
-                logger.info("Saved %s (%s) from %s", url, content_type, sender_id)
+                logger.info("Saved %s (%s) from %s", url, content_type, sender_display)
                 send_confirmation(sender_id, f"Saved: {url}")
             except sqlite3.IntegrityError:
                 logger.info("Duplicate URL skipped: %s", url)
@@ -369,20 +382,21 @@ def run(db_path: str) -> None:
     for batch in image_batches:
         sender_id = batch["sender_id"]
         sender_name = batch.get("sender_name", "")
+        sender_display = resolve_sender(sender_id, sender_name)
         group = batch.get("group_name", "")
         context = batch.get("context", "")
         timestamp = batch["timestamp"]
         attachments = batch["attachments"]
 
         # Log the batch as a message entry
-        _log_message(sender_id, f"[image batch: {len(attachments)} image(s)]", group)
+        _log_message(sender_display, f"[image batch: {len(attachments)} image(s)]", group)
 
         # Store in signal_messages table
         try:
             conn = get_connection(db_path)
             conn.execute(
                 "INSERT INTO signal_messages (sender, body, group_name, has_urls) VALUES (?, ?, ?, ?)",
-                (sender_id, context or f"[image batch: {len(attachments)} image(s)]", group or None, 0),
+                (sender_display, context or f"[image batch: {len(attachments)} image(s)]", group or None, 0),
             )
             conn.commit()
             conn.close()
@@ -404,7 +418,7 @@ def run(db_path: str) -> None:
             add_link(
                 url=synthetic_url,
                 source_type="signal",
-                sender=sender_id,
+                sender=sender_display,
                 context=context,
                 content_type="image",
                 metadata=json.dumps(metadata),
@@ -412,7 +426,7 @@ def run(db_path: str) -> None:
             )
             logger.info(
                 "Saved image batch (%d image(s)) from %s as %s",
-                len(attachments), sender_id, synthetic_url,
+                len(attachments), sender_display, synthetic_url,
             )
             send_confirmation(sender_id, f"Saved {len(attachments)} image(s)")
         except sqlite3.IntegrityError:
