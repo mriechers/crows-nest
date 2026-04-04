@@ -278,6 +278,45 @@ def send_confirmation(recipient: str, message: str) -> None:
         logger.warning("Could not send confirmation to %s: %s", recipient, exc)
 
 
+_CONTENT_TYPE_LABELS = {
+    "youtube": "YouTube video",
+    "social_video": "video",
+    "podcast": "podcast",
+    "web_page": "article",
+    "image": "image",
+}
+
+
+def _url_label(url: str, content_type: str = "") -> str:
+    """Return a short human label like 'YouTube video — youtu.be'."""
+    label = _CONTENT_TYPE_LABELS.get(content_type, "link")
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(url).hostname or url
+        # Strip common prefixes
+        for prefix in ("www.", "m.", "mobile."):
+            if domain.startswith(prefix):
+                domain = domain[len(prefix):]
+        return f"{label} — {domain}"
+    except Exception:
+        return label
+
+
+def _build_confirmation_message(labels: list[str]) -> str:
+    """Build a confirmation message for one or more saved items.
+
+    Single item: 'Saved: YouTube video — youtu.be'
+    Multiple:    'Saved 3 items: YouTube video — youtu.be, article — nyt.com, ...'
+    """
+    if len(labels) == 1:
+        return f"Saved: {labels[0]}"
+    joined = ", ".join(labels)
+    msg = f"Saved {len(labels)} items: {joined}"
+    if len(msg) > 160:
+        msg = msg[:157] + "..."
+    return msg
+
+
 def _log_message(sender: str, body: str, group: str = "") -> None:
     """Append every incoming message to a plain text log file."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -335,6 +374,9 @@ def run(db_path: str) -> None:
 
     image_batches, non_image_messages = _batch_image_messages(messages)
 
+    # Accumulate confirmation labels per sender for batched messaging
+    pending_confirmations: dict[str, list[str]] = {}
+
     # Process non-image messages (existing behaviour)
     for msg in non_image_messages:
         sender_id = msg["sender_id"]
@@ -374,7 +416,9 @@ def run(db_path: str) -> None:
                     db_path=db_path,
                 )
                 logger.info("Saved %s (%s) from %s", url, content_type, sender_display)
-                send_confirmation(sender_id, f"Saved: {url}")
+                pending_confirmations.setdefault(sender_id, []).append(
+                    _url_label(url, content_type)
+                )
             except sqlite3.IntegrityError:
                 logger.info("Duplicate URL skipped: %s", url)
 
@@ -428,9 +472,15 @@ def run(db_path: str) -> None:
                 "Saved image batch (%d image(s)) from %s as %s",
                 len(attachments), sender_display, synthetic_url,
             )
-            send_confirmation(sender_id, f"Saved {len(attachments)} image(s)")
+            label = f"{len(attachments)} image(s)" if len(attachments) > 1 else "image"
+            pending_confirmations.setdefault(sender_id, []).append(label)
         except sqlite3.IntegrityError:
             logger.info("Duplicate image URL skipped: %s", synthetic_url)
+
+    # Send batched confirmations — one message per sender
+    for recipient, labels in pending_confirmations.items():
+        msg = _build_confirmation_message(labels)
+        send_confirmation(recipient, msg)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ from signal_listener import (
     receive_messages,
     _write_health,
     resolve_sender,
+    _url_label,
+    _build_confirmation_message,
 )
 
 
@@ -335,3 +337,51 @@ def test_write_health_ok(tmp_path):
         data = json.load(f)
     assert data["status"] == "ok"
     assert "error" not in data
+
+
+# --- _url_label ---
+
+def test_url_label_youtube():
+    result = _url_label("https://www.youtube.com/watch?v=abc", "youtube")
+    assert result == "YouTube video — youtube.com"
+
+def test_url_label_web_page():
+    result = _url_label("https://nytimes.com/article", "web_page")
+    assert result == "article — nytimes.com"
+
+def test_url_label_unknown_type():
+    result = _url_label("https://example.com/page", "unknown")
+    assert result == "link — example.com"
+
+def test_url_label_strips_www():
+    result = _url_label("https://www.example.com/page", "web_page")
+    assert result == "article — example.com"
+
+def test_url_label_strips_mobile():
+    result = _url_label("https://m.tiktok.com/v/123", "social_video")
+    assert result == "video — tiktok.com"
+
+
+# --- _build_confirmation_message ---
+
+def test_build_confirmation_single():
+    msg = _build_confirmation_message(["YouTube video — youtu.be"])
+    assert msg == "Saved: YouTube video — youtu.be"
+
+def test_build_confirmation_multiple():
+    msg = _build_confirmation_message(["YouTube video — youtu.be", "article — nyt.com"])
+    assert msg.startswith("Saved 2 items:")
+    assert "YouTube video" in msg
+    assert "article" in msg
+
+def test_build_confirmation_truncation():
+    labels = [f"long label {i} with lots of text padding" for i in range(10)]
+    msg = _build_confirmation_message(labels)
+    assert len(msg) <= 160
+    assert msg.endswith("...")
+
+def test_build_confirmation_no_truncation_when_short():
+    labels = ["a", "b", "c"]
+    msg = _build_confirmation_message(labels)
+    assert "..." not in msg
+    assert msg == "Saved 3 items: a, b, c"
