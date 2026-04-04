@@ -1,12 +1,3 @@
 {
-  "sources": [
-    {
-      "category": "example-topic",
-      "slug": "example",
-      "url": "https://example.com/docs",
-      "notes": "Example source — replace with your own",
-      "tier": 1,
-      "refresh_cadence": "monthly"
-    }
-  ]
+  "sources": []
 }
