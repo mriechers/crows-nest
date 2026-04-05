@@ -82,6 +82,21 @@ def test_wikilink_uses_sanitized_title(tmp_path):
     assert "[[Claude How-To:" not in content
 
 
+def test_wikilink_preserves_collision_suffix(tmp_path):
+    """When caller passes a filename stem with collision suffix, wikilink uses it as-is."""
+    _append_to_weekly_log(
+        inbox_dir=str(tmp_path),
+        title="Duplicate Title (1)",
+        url="https://example.com/dup",
+        content_type="web_page",
+        source="Signal",
+        capture_date=date(2026, 3, 30),
+    )
+
+    content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
+    assert "[[Duplicate Title (1)]]" in content
+
+
 def test_maps_content_types_to_sections(tmp_path):
     """Each content type maps to the correct section header."""
     for ctype, section in CONTENT_TYPE_SECTION_MAP.items():

@@ -28,12 +28,13 @@ def test_sanitize_title_strips_whitespace():
     assert utils.sanitize_title("  hello  ") == "hello"
 
 
-def test_sanitize_title_strips_brackets_and_hash():
-    result = utils.sanitize_title("Title [with] #brackets")
+def test_sanitize_title_strips_brackets_hash_and_caret():
+    result = utils.sanitize_title("Title [with] #brackets ^block")
     assert "[" not in result
     assert "]" not in result
     assert "#" not in result
-    assert result == "Title with brackets"
+    assert "^" not in result
+    assert result == "Title with brackets block"
 
 
 def test_extract_urls_single():

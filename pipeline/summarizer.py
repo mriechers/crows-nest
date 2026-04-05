@@ -1050,11 +1050,12 @@ def run(db_path: str) -> None:
             )
 
             note_path = write_obsidian_note(title, frontmatter, body)
+            note_title = os.path.splitext(os.path.basename(note_path))[0]
 
             try:
                 _append_to_weekly_log(
                     inbox_dir=os.path.join(OBSIDIAN_VAULT, "0 - INBOX"),
-                    title=title,
+                    title=note_title,
                     url=link["url"],
                     content_type=link["content_type"] or "web_page",
                     source=link.get("sender") or link.get("source_type") or "unknown",
