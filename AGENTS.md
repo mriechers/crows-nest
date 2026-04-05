@@ -20,6 +20,7 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 - `pipeline/status.py` — dashboard (`python status.py`) and health check (`python status.py --health`)
 - `pipeline/add_link.py` — CLI to manually queue URLs
 - `pipeline/keychain_secrets.py` — macOS Keychain with env var fallback for API keys
+- `pipeline/fix_obsidian_names.py` — fixes Obsidian filenames with banned characters and updates weekly log wikilinks to match (dry run by default, pass `--apply` to write changes)
 
 ### Running manually
 
@@ -29,6 +30,8 @@ cd ~/Developer/second-brain/crows-nest
 .venv/bin/python pipeline/add_link.py "URL"   # queue a URL
 .venv/bin/python pipeline/processor.py        # process pending
 .venv/bin/python pipeline/summarizer.py       # summarize transcribed
+.venv/bin/python pipeline/fix_obsidian_names.py          # dry run: check for bad filenames/wikilinks
+.venv/bin/python pipeline/fix_obsidian_names.py --apply  # fix bad filenames/wikilinks
 ```
 
 ### Scheduling
