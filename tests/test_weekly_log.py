@@ -66,6 +66,22 @@ def test_appends_to_existing_weekly_log(tmp_path):
     assert "[[Second Article]]" in content
 
 
+def test_wikilink_uses_sanitized_title(tmp_path):
+    """Wikilinks should use the sanitized title to match the actual filename."""
+    _append_to_weekly_log(
+        inbox_dir=str(tmp_path),
+        title="Claude How-To: From Basics to Advanced",
+        url="https://example.com/video",
+        content_type="social_video",
+        source="cli",
+        capture_date=date(2026, 3, 30),
+    )
+
+    content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
+    assert "[[Claude How-To From Basics to Advanced]]" in content
+    assert "[[Claude How-To:" not in content
+
+
 def test_maps_content_types_to_sections(tmp_path):
     """Each content type maps to the correct section header."""
     for ctype, section in CONTENT_TYPE_SECTION_MAP.items():

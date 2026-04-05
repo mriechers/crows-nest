@@ -900,7 +900,7 @@ def _append_to_weekly_log(
             f.write(content)
 
     section = CONTENT_TYPE_SECTION_MAP.get(content_type, "Other")
-    entry_line = f"- {capture_date.isoformat()} \u2014 [[{title}]] \u00b7 [{content_type}]({url}) \u00b7 via {source}\n"
+    entry_line = f"- {capture_date.isoformat()} \u2014 [[{sanitize_title(title)}]] \u00b7 [{content_type}]({url}) \u00b7 via {source}\n"
 
     with open(filepath, "r", encoding="utf-8") as f:
         lines = f.readlines()
