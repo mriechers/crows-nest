@@ -14,8 +14,8 @@ import shutil
 import tarfile
 import tempfile
 from datetime import datetime, timezone
-
 import boto3
+import requests
 from botocore.config import Config as BotoConfig
 
 from db import DB_PATH, claim_link, get_pending, log_processing, update_status
@@ -95,6 +95,32 @@ def upload_to_r2(local_path: str, r2_key: str) -> bool:
         return False
 
 
+def save_to_readwise(url: str) -> bool:
+    """Save a web page URL to Readwise Reader's archive. Returns True on success."""
+    token = get_secret("READWISE_TOKEN")
+    if not token:
+        logger.warning("READWISE_TOKEN not found, skipping Readwise save")
+        return False
+
+    try:
+        resp = requests.post(
+            "https://readwise.io/api/v3/save/",
+            headers={"Authorization": f"Token {token}"},
+            json={
+                "url": url,
+                "location": "archive",
+                "tags": ["crows-nest"],
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        logger.info("Saved to Readwise archive: %s", url)
+        return True
+    except Exception as e:
+        logger.error("Readwise save failed for %s: %s", url, e)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # R2 key derivation
 # ---------------------------------------------------------------------------
@@ -151,13 +177,18 @@ def run(db_path: str) -> None:
 
         logger.info("link %d: archiving %s", link_id, url)
 
-        # No media directory — mark archived and skip upload
+        # No media directory — save articles to Readwise, then mark archived
         if not media_dir or not os.path.isdir(media_dir):
             logger.info(
                 "link %d: no media dir (%r), marking archived with path=none",
                 link_id,
                 media_dir,
             )
+
+            # Save web pages to Readwise Reader archive
+            if content_type == "web_page":
+                save_to_readwise(url)
+
             update_status(
                 link_id=link_id,
                 status="archived",

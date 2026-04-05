@@ -21,12 +21,13 @@ logger = logging.getLogger("mcp_knowledge.server")
 from . import config, knowledge
 
 # ---------------------------------------------------------------------------
-# Pipeline db import — pipeline/ lives at the project root, one level above src/
+# Pipeline db import — pipeline/ is a package at the project root, above src/
+# Add the project root to sys.path so `from pipeline.db import ...` resolves.
 # ---------------------------------------------------------------------------
 
-_PIPELINE_DIR = str(Path(__file__).resolve().parent.parent.parent / "pipeline")
-if _PIPELINE_DIR not in sys.path:
-    sys.path.insert(0, _PIPELINE_DIR)
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 try:
     from pipeline.db import (
@@ -39,7 +40,7 @@ try:
     from pipeline.config import DB_PATH as _DB_PATH
     _RSS_AVAILABLE = True
 except ImportError as _rss_exc:
-    logger.warning("RSS db unavailable: %s", _rss_exc)
+    logger.warning("RSS db unavailable — pipeline import failed: %s", _rss_exc)
     _RSS_AVAILABLE = False
 
 mcp = FastMCP(config.SERVER_NAME)
