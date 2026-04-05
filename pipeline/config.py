@@ -52,7 +52,7 @@ MESSAGE_LOG = os.path.join(LOG_DIR, "signal-messages.log")
 SIGNAL_HEALTH_FILE = os.path.join(LOG_DIR, "signal-health.json")
 WHISPER_SCRIPT = os.path.join(SCRIPTS_DIR, "whisper-transcribe.sh")
 
-OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "CLIPPINGS - Need Sorting")
+OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "INTERNET CLIPPINGS")
 OBSIDIAN_ARCHIVE = os.path.join(OBSIDIAN_VAULT, "4 - ARCHIVE")
 
 
