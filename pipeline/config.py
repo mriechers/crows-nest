@@ -57,6 +57,16 @@ OBSIDIAN_ARCHIVE = os.path.join(OBSIDIAN_VAULT, "4 - ARCHIVE")
 
 
 # ---------------------------------------------------------------------------
+# Ingest API (Cloudflare Worker + D1 queue)
+# ---------------------------------------------------------------------------
+
+INGEST_API_URL = os.environ.get(
+    "CROWS_NEST_INGEST_API_URL",
+    "https://share.bymarkriechers.com/api",
+)
+
+
+# ---------------------------------------------------------------------------
 # Image processing — platform-adaptive
 # ---------------------------------------------------------------------------
 
