@@ -305,7 +305,7 @@ def call_claude_for_summary(content: str, content_type: str, title: str = "",
 - "people": array of "**Name** — role/relevance" strings for people mentioned IN THE CONTENT (or empty array). Do NOT include the person who shared the link.
 - "related_links": array of any URLs, tools, products, repos, or named resources mentioned that someone might want to look up, formatted as "Name or description — context" (or empty array)
 - "followups": array of 1-3 actionable next steps or things to investigate further (or empty array)
-- "title": a clear, descriptive title for this content (5-10 words, like a good article headline — NOT the sender's name or "From Signal"){sender_note}
+- "title": a clear, descriptive title for this content (5-10 words, like a good article headline — NOT the sender's name or "From Signal"). IMPORTANT: The title must be a real headline, never your own commentary or reasoning. If you are uncertain, write a best-guess descriptive title.{sender_note}
 
 Title hint: {title}
 
@@ -672,7 +672,10 @@ def _refine_title_with_enrichment(claude_result: dict) -> dict:
         f"'ADHD Field Guide Release Day — Childhood Library Full Circle'\n"
         f"- 'New Horror Game Revealed' + 'Horda - Steam' → "
         f"'Horda — Darkwood Creator Reveals New Horror Game'\n\n"
-        f"Keep it 5-12 words. Return ONLY the revised title, nothing else."
+        f"Keep it 5-12 words. Return ONLY the revised title, nothing else.\n"
+        f"If you cannot find a specific work name in the links, return the "
+        f"current title unchanged. NEVER return explanations, reasoning, or "
+        f"sentences starting with 'I cannot' — only a headline."
     )
 
     payload = json.dumps({
@@ -701,6 +704,15 @@ def _refine_title_with_enrichment(claude_result: dict) -> dict:
 
         response = json.loads(raw)
         refined = response["choices"][0]["message"]["content"].strip().strip('"')
+
+        # Reject model reasoning that leaked into the title
+        if refined and any(refined.lower().startswith(p) for p in (
+            "i cannot", "i can't", "i could not", "i don't", "i do not",
+            "i was unable", "i wasn't able", "the title",
+            "based on", "unfortunately",
+        )):
+            logger.warning("title refinement returned reasoning, keeping original: '%s'", refined[:80])
+            refined = None
 
         if refined and refined != current_title:
             logger.info("title refined: '%s' -> '%s'", current_title, refined)
@@ -1099,8 +1111,16 @@ def run(db_path: str) -> None:
                 or "untitled"
             )
 
-            # Use AI-generated title if available, otherwise fall back
-            title = claude_result.get("title") or title_hint
+            # Use AI-generated title if available, otherwise fall back.
+            # Reject titles that are model reasoning, not headlines.
+            ai_title = claude_result.get("title", "")
+            if ai_title and any(ai_title.lower().startswith(p) for p in (
+                "i cannot", "i can't", "i could not", "i don't", "i do not",
+                "i was unable", "i wasn't able", "based on", "unfortunately",
+            )):
+                logger.warning("AI title looks like reasoning, using hint: '%s'", ai_title[:80])
+                ai_title = ""
+            title = ai_title or title_hint
 
             # Build note
             frontmatter = build_frontmatter(
