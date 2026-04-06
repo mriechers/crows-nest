@@ -10,8 +10,8 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 
 1. **Listener** (`pipeline/signal_listener.py`) — polls signal-cli every 5 min, extracts URLs and image batches, saves to SQLite
 2. **Processor** (`pipeline/processor.py`) — downloads media, transcribes audio/video with Whisper, scrapes web pages
-3. **Summarizer** (`pipeline/summarizer.py`) — calls Claude Haiku via OpenRouter for structured analysis, writes Obsidian notes to `0 - INBOX/Clippings/`
-4. **Archiver** (`pipeline/archiver.py`) — tar.gz + SHA-256 manifest → Cloudflare R2 (`crows-nest-media-archive` bucket)
+3. **Summarizer** (`pipeline/summarizer.py`) — calls Claude Haiku via OpenRouter for structured analysis, writes Obsidian notes to `2 - AREAS/INTERNET CLIPPINGS/`
+4. **Archiver** (`pipeline/archiver.py`) — uploads individual media files to R2 with Content-Type headers for inline playback, generates share URLs via `share.bymarkriechers.com`, writes them to DB and Obsidian note. Web pages are saved to Readwise Reader instead.
 
 ### Key files
 
@@ -20,7 +20,8 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 - `pipeline/status.py` — dashboard (`python status.py`) and health check (`python status.py --health`)
 - `pipeline/add_link.py` — CLI to manually queue URLs
 - `pipeline/keychain_secrets.py` — macOS Keychain with env var fallback for API keys
-- `pipeline/fix_obsidian_names.py` — fixes Obsidian filenames with banned characters and updates weekly log wikilinks to match (dry run by default, pass `--apply` to write changes)
+- `pipeline/sync_clippings.py` — reusable tool to sync Obsidian clippings with DB and current spec (idempotent, rule-based normalization)
+- `pipeline/backfill_video.py` — download video for items that only have audio
 
 ### Running manually
 
@@ -30,8 +31,6 @@ cd ~/Developer/second-brain/crows-nest
 .venv/bin/python pipeline/add_link.py "URL"   # queue a URL
 .venv/bin/python pipeline/processor.py        # process pending
 .venv/bin/python pipeline/summarizer.py       # summarize transcribed
-.venv/bin/python pipeline/fix_obsidian_names.py          # dry run: check for bad filenames/wikilinks
-.venv/bin/python pipeline/fix_obsidian_names.py --apply  # fix bad filenames/wikilinks
 ```
 
 ### Scheduling

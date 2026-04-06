@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS links (
     obsidian_note_path TEXT,
     archive_path     TEXT,
     video_path       TEXT,
+    share_url        TEXT,
     error            TEXT,
     retry_count      INTEGER NOT NULL DEFAULT 0,
     metadata         TEXT
@@ -114,12 +115,13 @@ def init_db(db_path: str = DB_PATH) -> None:
         conn.executescript(SCHEMA)
         conn.executescript(RSS_SCHEMA)
         conn.commit()
-        # Migrate existing databases: add video_path if missing
-        try:
-            conn.execute("ALTER TABLE links ADD COLUMN video_path TEXT")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+        # Migrate existing databases: add columns if missing
+        for col in ("video_path TEXT", "share_url TEXT"):
+            try:
+                conn.execute(f"ALTER TABLE links ADD COLUMN {col}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists
     finally:
         conn.close()
 
