@@ -829,16 +829,70 @@ def write_obsidian_note(title: str, frontmatter: str, body: str) -> str:
 
 # --- Weekly Links Log ---
 
-CONTENT_TYPE_SECTION_MAP = {
-    "youtube": "Videos",
-    "social_video": "Videos",
-    "web_page": "Articles",
-    "podcast": "Podcasts",
-    "audio": "Podcasts",
+# Ordered tag-to-category rules. First matching rule wins.
+# Each rule is (set_of_tag_substrings, category_name).
+TAG_CATEGORY_RULES: list[tuple[set[str], str]] = [
+    (
+        {"marathon-game", "marathon-guide", "marathon-solo", "marathon-farming"},
+        "Gaming",
+    ),
+    (
+        {"gaming-tips", "pvp-strategy", "extraction-games", "game-mechanics",
+         "indie-games", "character-builds", "speedrun"},
+        "Gaming",
+    ),
+    (
+        {"claude-code", "ai-agents", "mcp-server", "prompt-engineering",
+         "llm-tools", "context-engineering", "workflow-automation",
+         "developer-tools", "ai-automation", "harness-engineering",
+         "browser-automation", "local-llm", "ai-workflows", "coding-agents"},
+        "AI & Dev Tools",
+    ),
+    (
+        {"horror-film", "horror-movies", "psychological-horror", "analog-horror",
+         "found-footage", "cosmic-horror", "supernatural-horror", "horror-games",
+         "movie-review", "film-review", "movie-recommendation", "thriller",
+         "horror-nostalgia", "horror-content"},
+        "Horror & Film",
+    ),
+    (
+        {"career-coaching", "burnout-recovery", "professional-development",
+         "leadership", "workplace-culture", "management-leadership",
+         "employee-engagement", "toxic-workplace", "executive-education"},
+        "Work & Leadership",
+    ),
+    (
+        {"activism", "surveillance-capitalism", "ai-ethics", "corporate-lobbying",
+         "regulatory-capture", "government-technology", "digital-rights",
+         "content-moderation", "deepfake", "ai-satire", "privatization"},
+        "Politics & Society",
+    ),
+    (
+        {"relationships", "personal-growth", "self-care", "philosophy",
+         "self-love", "existentialism", "communication-skills",
+         "emotional-intelligence", "heartbreak", "dating-advice"},
+        "Personal Growth",
+    ),
+    (
+        {"3d-printing", "self-hosting", "open-source", "single-board-computer",
+         "home-lab", "video-codec", "web-development", "right-to-repair",
+         "iphone-customization", "open-source-hardware"},
+        "Tech & Hardware",
+    ),
+    (
+        {"home-cleaning", "desk-organization", "phone-accessories",
+         "interior-design", "room-divider", "fashion-trends", "workspace-setup",
+         "sustainable-products"},
+        "Products & Home",
+    ),
+]
+
+# Content-type fallback for entries with no matching tags.
+CONTENT_TYPE_FALLBACK_MAP = {
+    "podcast": "News & Current Events",
+    "audio": "News & Current Events",
     "image": "Images",
 }
-
-WEEKLY_LOG_SECTIONS = ["Videos", "Articles", "Podcasts", "Images", "Other"]
 
 WEEKLY_LOG_TEMPLATE = """---
 title: "Weekly Links — {week_label}"
@@ -846,20 +900,31 @@ created: {created}
 week_start: {week_start}
 week_end: {week_end}
 para: inbox
-tags: [weekly-links, inbox-capture]
+tags:
+  - all
+  - weekly-links
+  - inbox-capture
 ---
 # Weekly Links — {week_label}
 
-## Videos
-
-## Articles
-
-## Podcasts
-
-## Images
-
 ## Other
 """
+
+
+def categorize_from_tags(
+    tags: list[str],
+    content_type: str = "web_page",
+) -> str:
+    """Determine a topic category from a note's tags.
+
+    Checks tags against TAG_CATEGORY_RULES in priority order.
+    Falls back to content-type mapping, then "Other".
+    """
+    tag_set = set(tags)
+    for rule_tags, category in TAG_CATEGORY_RULES:
+        if tag_set & rule_tags:
+            return category
+    return CONTENT_TYPE_FALLBACK_MAP.get(content_type, "Other")
 
 
 def _append_to_weekly_log(
@@ -868,12 +933,14 @@ def _append_to_weekly_log(
     url: str,
     content_type: str,
     source: str,
+    tags: list[str] | None = None,
     capture_date: date | None = None,
 ) -> None:
     """Append an entry to the current week's links log.
 
     Creates the file from template if it doesn't exist.
-    Appends a line under the matching content-type section header.
+    Categorizes the entry by topic tags and appends under the matching
+    section header, creating the section dynamically if needed.
     """
     from datetime import date as date_type, timedelta
 
@@ -899,7 +966,7 @@ def _append_to_weekly_log(
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
-    section = CONTENT_TYPE_SECTION_MAP.get(content_type, "Other")
+    section = categorize_from_tags(tags or [], content_type)
     entry_line = f"- {capture_date.isoformat()} \u2014 [[{sanitize_title(title)}]] \u00b7 [{content_type}]({url}) \u00b7 via {source}\n"
 
     with open(filepath, "r", encoding="utf-8") as f:
@@ -914,7 +981,20 @@ def _append_to_weekly_log(
             break
 
     if not inserted:
-        lines.append(entry_line)
+        # Insert new section before "## Other" so Other stays last.
+        other_idx = None
+        for i, line in enumerate(lines):
+            if line == "## Other\n":
+                other_idx = i
+                break
+        if other_idx is not None:
+            lines.insert(other_idx, f"\n{section_header}\n")
+            # Entry goes right after the new header (other_idx + 1 is the header,
+            # other_idx + 2 is the blank line after it).
+            lines.insert(other_idx + 2, entry_line)
+        else:
+            lines.append(f"\n{section_header}\n")
+            lines.append(entry_line)
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.writelines(lines)
@@ -1059,6 +1139,7 @@ def run(db_path: str) -> None:
                     url=link["url"],
                     content_type=link["content_type"] or "web_page",
                     source=link.get("sender") or link.get("source_type") or "unknown",
+                    tags=claude_result.get("tags", []),
                 )
             except Exception as e:
                 logger.warning("Failed to append to weekly log: %s", e)
