@@ -115,7 +115,7 @@ class TestExtractUrlsFromNote:
 class TestScanAndIngest:
     """Test the main scan_and_ingest orchestration."""
 
-    def test_ingests_urls_and_deletes_note(self, tmp_path):
+    def test_ingests_urls_and_archives_note(self, tmp_path):
         from obsidian_scanner import scan_and_ingest
         from db import init_db, get_connection
 
@@ -137,8 +137,10 @@ class TestScanAndIngest:
         count = scan_and_ingest(str(vault_dir), db_path=db_path)
         assert count == 2
 
-        # Note should be deleted
+        # Note should be moved to archive, not at original location
         assert not note.exists()
+        archived = vault_dir / "4 - ARCHIVE" / "processed-clippings" / "saved-links.md"
+        assert archived.exists()
 
         # URLs should be in the DB
         conn = get_connection(db_path)
@@ -149,7 +151,7 @@ class TestScanAndIngest:
         assert rows[0]["source_type"] == "obsidian"
         assert rows[1]["url"] == "https://youtu.be/abc123"
 
-    def test_skips_duplicates_still_deletes_note(self, tmp_path):
+    def test_skips_duplicates_still_archives_note(self, tmp_path):
         from obsidian_scanner import scan_and_ingest
         from db import init_db, add_link
 
@@ -170,7 +172,9 @@ class TestScanAndIngest:
 
         count = scan_and_ingest(str(vault_dir), db_path=db_path)
         assert count == 0  # dupe not counted
-        assert not note.exists()  # note still deleted
+        assert not note.exists()  # note moved from original location
+        archived = vault_dir / "4 - ARCHIVE" / "processed-clippings" / "links.md"
+        assert archived.exists()  # note archived
 
     def test_noop_when_no_pending_notes(self, tmp_path):
         from obsidian_scanner import scan_and_ingest

@@ -4,7 +4,7 @@ Obsidian vault scanner for the Crow's Nest pipeline.
 
 Scans the Obsidian vault for notes tagged with 'pending-clippings',
 extracts URLs from the note body, ingests them via add_link(), and
-deletes the note once all URLs are processed.
+archives the note to 4 - ARCHIVE/ once all URLs are processed.
 
 This provides an offline-first fallback: just write URLs into a note
 and the pipeline picks them up on the next scan cycle.
@@ -18,6 +18,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import shutil
+
 from config import OBSIDIAN_VAULT
 from content_types import classify_url
 from db import DB_PATH, add_link, init_db
@@ -27,6 +29,15 @@ logger = setup_logging("crows-nest.obsidian-scanner")
 
 _TAG_PATTERN = re.compile(r"pending-clippings")
 _FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def _archive_note(note_path: str, vault_path: str) -> None:
+    """Move a processed note to the vault's archive directory."""
+    archive_dir = os.path.join(vault_path, "4 - ARCHIVE", "processed-clippings")
+    os.makedirs(archive_dir, exist_ok=True)
+    dest = os.path.join(archive_dir, os.path.basename(note_path))
+    shutil.move(note_path, dest)
+    logger.info("Archived note to %s", dest)
 
 
 def find_pending_notes(vault_path: str) -> list[str]:
@@ -85,8 +96,8 @@ def scan_and_ingest(vault_path: str, db_path: str = DB_PATH) -> int:
 
         urls = extract_urls_from_note(content)
         if not urls:
-            logger.info("No URLs in %s, deleting empty note", os.path.basename(note_path))
-            os.remove(note_path)
+            logger.info("No URLs in %s, archiving empty note", os.path.basename(note_path))
+            _archive_note(note_path, vault_path)
             continue
 
         added = 0
@@ -106,8 +117,8 @@ def scan_and_ingest(vault_path: str, db_path: str = DB_PATH) -> int:
             except sqlite3.IntegrityError:
                 logger.info("Skipped duplicate: %s", url)
 
-        os.remove(note_path)
-        logger.info("Deleted note: %s (%d new, %d total URLs)", os.path.basename(note_path), added, len(urls))
+        _archive_note(note_path, vault_path)
+        logger.info("Processed note: %s (%d new, %d total URLs)", os.path.basename(note_path), added, len(urls))
         total_added += added
 
     return total_added
