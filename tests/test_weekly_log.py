@@ -154,9 +154,16 @@ def test_dynamic_section_creation(tmp_path):
     other_pos = content.index("## Other")
     assert ai_pos < other_pos
     assert horror_pos < other_pos
-    # Random link with no matching tags should be under Other
+    # Entries land under their own section, not under Other
+    # split("## ")[1] gives text after the header up to the next section
+    ai_section = content[ai_pos:].split("## ")[1]
+    assert "[[AI Tool]]" in ai_section
+    horror_section = content[horror_pos:].split("## ")[1]
+    assert "[[Horror Movie]]" in horror_section
     other_section = content[other_pos:]
     assert "[[Random Link]]" in other_section
+    assert "[[AI Tool]]" not in other_section
+    assert "[[Horror Movie]]" not in other_section
 
 
 def test_entries_land_under_correct_section(tmp_path):
@@ -175,9 +182,10 @@ def test_entries_land_under_correct_section(tmp_path):
     content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
     # Only one Gaming section header
     assert content.count("## Gaming") == 1
-    # All three entries present
+    # All three entries are under the Gaming section, not Other
+    gaming_section = content.split("## Gaming")[1].split("## ")[0]
     for i in range(3):
-        assert f"[[Marathon Tip {i}]]" in content
+        assert f"[[Marathon Tip {i}]]" in gaming_section
 
 
 def test_no_tags_uses_content_type_fallback(tmp_path):

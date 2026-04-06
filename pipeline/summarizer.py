@@ -830,7 +830,7 @@ def write_obsidian_note(title: str, frontmatter: str, body: str) -> str:
 # --- Weekly Links Log ---
 
 # Ordered tag-to-category rules. First matching rule wins.
-# Each rule is (set_of_tag_substrings, category_name).
+# Each rule is (set_of_tags, category_name).
 TAG_CATEGORY_RULES: list[tuple[set[str], str]] = [
     (
         {"marathon-game", "marathon-guide", "marathon-solo", "marathon-farming"},
@@ -989,9 +989,9 @@ def _append_to_weekly_log(
                 break
         if other_idx is not None:
             lines.insert(other_idx, f"\n{section_header}\n")
-            # Entry goes right after the new header (other_idx + 1 is the header,
-            # other_idx + 2 is the blank line after it).
-            lines.insert(other_idx + 2, entry_line)
+            # list.insert adds one element regardless of embedded newlines,
+            # so the entry goes at other_idx + 1 (right after the header).
+            lines.insert(other_idx + 1, entry_line)
         else:
             lines.append(f"\n{section_header}\n")
             lines.append(entry_line)
