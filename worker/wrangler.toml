@@ -1,0 +1,14 @@
+name = "crows-nest-ingest"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Route: handle /api/* on the existing share domain.
+# All other paths fall through to R2 (media archive).
+routes = [
+  { pattern = "share.bymarkriechers.com/api/*", zone_name = "bymarkriechers.com" }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "crows-nest-ingest"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
