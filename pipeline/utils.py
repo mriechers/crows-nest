@@ -24,7 +24,7 @@ def _strip_trailing_punct(url: str) -> str:
 
 def sanitize_title(title: str, max_length: int = 100) -> str:
     """Remove chars unsafe for filenames, collapse whitespace, truncate."""
-    unsafe = r'[<>:"/\\|?*]'
+    unsafe = r'[<>:"/\\|?*\[\]#^]'
     result = re.sub(unsafe, "", title)
     result = re.sub(r"\s+", " ", result)
     result = result[:max_length]
