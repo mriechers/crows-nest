@@ -165,7 +165,7 @@ def slugify(text: str, max_length: int = 80) -> str:
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_]+", "-", text)
     text = re.sub(r"-+", "-", text).strip("-")
-    return text[:max_length].rstrip("-")
+    return text[:max_length].rstrip("-") or "untitled"
 
 
 def make_r2_key(media_dir: str, media_file: str) -> str:
@@ -207,9 +207,11 @@ def update_obsidian_note(note_path: str, share_url: str) -> bool:
         return False  # Already has it
 
     # Insert share-url before the closing --- of frontmatter
-    # Find the second --- (closing frontmatter delimiter)
     if content.startswith("---"):
-        close_idx = content.index("---", 3)
+        close_idx = content.find("---", 3)
+        if close_idx == -1:
+            logger.warning("Malformed frontmatter in %s, skipping", note_path)
+            return False
         # Ensure we're on a new line before inserting
         prefix = "" if content[close_idx - 1] == "\n" else "\n"
         content = (

@@ -56,7 +56,9 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     if not content.startswith("---"):
         return {}, content
 
-    close = content.index("---", 3)
+    close = content.find("---", 3)
+    if close == -1:
+        return {}, content
     fm_text = content[3:close].strip()
     body = content[close + 3:].lstrip("\n")
 
@@ -106,7 +108,8 @@ def serialize_frontmatter(fm: dict) -> str:
             for item in value:
                 lines.append(f"  - {item}")
         elif isinstance(value, str) and (":" in value or '"' in value or value != value.strip()):
-            lines.append(f'{key}: "{value}"')
+            escaped = value.replace('"', '\\"')
+            lines.append(f'{key}: "{escaped}"')
         else:
             lines.append(f"{key}: {value}")
     lines.append("---")
