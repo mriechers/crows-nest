@@ -11,4 +11,4 @@ routes = [
 [[d1_databases]]
 binding = "DB"
 database_name = "crows-nest-ingest"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "372349af-f1b9-412c-bb82-9cb7a66c8e4a"
