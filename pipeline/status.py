@@ -142,6 +142,18 @@ PIPELINE_JOBS = {
         "log": os.path.join(LOG_DIR, "launchd-crows-nest-archiver.log"),
         "max_stale_minutes": 1500,   # runs daily at 3 AM
     },
+    "ingest_poller.py": {
+        "log": os.path.join(LOG_DIR, "launchd-ingest-poller.log"),
+        "max_stale_minutes": 15,     # runs every 5 min
+    },
+    "obsidian_scanner.py": {
+        "log": os.path.join(LOG_DIR, "launchd-obsidian-scanner.log"),
+        "max_stale_minutes": 15,     # runs every 5 min
+    },
+    "imessage_listener.py": {
+        "log": os.path.join(LOG_DIR, "launchd-imessage-listener.log"),
+        "max_stale_minutes": 15,     # runs every 5 min
+    },
 }
 
 
@@ -270,6 +282,45 @@ def print_health() -> bool:
     return all_ok
 
 
+def print_sources(db_path: str, days: int = 7) -> None:
+    """Print a breakdown of links by source_type for the last N days."""
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            SELECT source_type, COUNT(*) AS cnt
+            FROM links
+            WHERE created_at >= datetime('now', ?)
+            GROUP BY source_type
+            ORDER BY cnt DESC
+            """,
+            (f"-{days} days",),
+        )
+        rows = cursor.fetchall()
+
+        print()
+        print(f"CROW'S NEST — Sources (last {days} days)")
+        print("=" * 40)
+        print()
+
+        if rows:
+            total = sum(row["cnt"] for row in rows)
+            for row in rows:
+                source = row["source_type"] or "unknown"
+                cnt = row["cnt"]
+                bar = "█" * min(cnt, 30)
+                print(f"  {source:<16} {cnt:>4}  {bar}")
+            print()
+            print(f"  {'TOTAL':<16} {total:>4}")
+        else:
+            print("  (no links in this period)")
+        print()
+
+    finally:
+        conn.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Crow's Nest pipeline status dashboard"
@@ -284,11 +335,20 @@ def main() -> None:
         action="store_true",
         help="Run health checks and exit with code 0 (healthy) or 1 (problems)",
     )
+    parser.add_argument(
+        "--sources",
+        action="store_true",
+        help="Show breakdown of links by source type for the last 7 days",
+    )
     args = parser.parse_args()
 
     if args.health:
         healthy = print_health()
         sys.exit(0 if healthy else 1)
+
+    if args.sources:
+        print_sources(args.db)
+        return
 
     print_dashboard(args.db)
 

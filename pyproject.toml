@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.0",
     "thefuzz[speedup]",
+    "requests>=2.31",
 ]
 
 [project.scripts]
@@ -13,9 +14,9 @@ mcp-knowledge-server = "mcp_knowledge.server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "httpx>=0.24"]
-archive = ["boto3>=1.28", "requests>=2.31"]
+archive = ["boto3>=1.28"]
 semantic = ["chromadb>=0.5", "fastembed>=0.3"]
-rss = ["feedparser>=6.0", "requests>=2.31"]
+rss = ["feedparser>=6.0"]
 all = ["crows-nest[archive,semantic,rss]"]
 
 [tool.hatch.build.targets.wheel]
