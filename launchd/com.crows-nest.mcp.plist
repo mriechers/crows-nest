@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.crows-nest.mcp</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mriechers/Developer/second-brain/crows-nest/.venv/bin/python</string>
+        <string>-m</string>
+        <string>mcp_knowledge.server</string>
+        <string>sse</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/mriechers/Developer/second-brain/crows-nest</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/mriechers/Developer/second-brain/crows-nest</string>
+        <key>MCP_TRANSPORT</key>
+        <string>sse</string>
+        <key>MCP_SSE_PORT</key>
+        <string>27185</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/mriechers/Developer/second-brain/crows-nest/logs/mcp-server.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/mriechers/Developer/second-brain/crows-nest/logs/mcp-server.stderr.log</string>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
