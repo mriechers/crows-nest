@@ -61,6 +61,7 @@ def build_frontmatter(
     tags: list,
     sender: str = None,
     metadata: dict = None,
+    intake: str = "unknown",
 ) -> str:
     """Build YAML frontmatter matching Obsidian vault conventions.
 
@@ -85,6 +86,7 @@ def build_frontmatter(
         f"source: {source}",
         f"created: {created}",
         f"content-type: {content_type}",
+        f"intake: {intake}",
     ]
 
     if metadata.get("platform"):
@@ -811,24 +813,37 @@ def _extract_json(text: str) -> dict | None:
 # Note writer
 # ---------------------------------------------------------------------------
 
-def write_obsidian_note(title: str, frontmatter: str, body: str) -> str:
+def write_obsidian_note(title: str, frontmatter: str, body: str,
+                        created_at: str = None) -> str:
     """Write a note to the Obsidian clippings directory.
 
+    When created_at is provided, notes are organized into YYYY/MM/DD
+    subfolders for easier discoverability. Falls back to flat directory.
     Handles filename collisions with (1), (2) suffixes.
     Returns the absolute file path.
     """
-    os.makedirs(OBSIDIAN_CLIPPINGS, exist_ok=True)
+    # Build target directory — date subfolder if created_at is available
+    target_dir = OBSIDIAN_CLIPPINGS
+    if created_at:
+        try:
+            date_str = created_at[:10]  # "2026-04-06T12:00:00" → "2026-04-06"
+            year, month, day = date_str.split("-")
+            target_dir = os.path.join(OBSIDIAN_CLIPPINGS, year, month, day)
+        except (ValueError, IndexError):
+            pass  # malformed date — fall back to flat directory
+
+    os.makedirs(target_dir, exist_ok=True)
 
     safe_title = sanitize_title(title)
     if not safe_title:
         safe_title = "untitled"
 
-    base_path = os.path.join(OBSIDIAN_CLIPPINGS, f"{safe_title}.md")
+    base_path = os.path.join(target_dir, f"{safe_title}.md")
     file_path = base_path
 
     counter = 1
     while os.path.exists(file_path):
-        file_path = os.path.join(OBSIDIAN_CLIPPINGS, f"{safe_title} ({counter}).md")
+        file_path = os.path.join(target_dir, f"{safe_title} ({counter}).md")
         counter += 1
 
     note_content = f"{frontmatter}\n\n{body}\n"
@@ -1130,6 +1145,7 @@ def run(db_path: str) -> None:
                 tags=claude_result.get("tags", []),
                 sender=sender,
                 metadata=metadata,
+                intake=link.get("source_type") or "unknown",
             )
 
             body = generate_note_content(
@@ -1149,7 +1165,10 @@ def run(db_path: str) -> None:
                 extracted_text=extracted_text,
             )
 
-            note_path = write_obsidian_note(title, frontmatter, body)
+            note_path = write_obsidian_note(
+                title, frontmatter, body,
+                created_at=link.get("created_at"),
+            )
             note_title = os.path.splitext(os.path.basename(note_path))[0]
 
             try:

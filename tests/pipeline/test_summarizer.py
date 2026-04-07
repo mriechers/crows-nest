@@ -134,3 +134,61 @@ def test_generate_note_content_full_transcript_not_truncated():
     assert long_transcript.strip() in result
     assert "truncated" not in result
     assert "<details>" in result
+
+
+def test_build_frontmatter_includes_intake():
+    """Verify intake field appears in frontmatter when provided."""
+    result = build_frontmatter(
+        title="iMessage Link",
+        source="https://example.com/test",
+        content_type="web_page",
+        tags=["test"],
+        intake="imessage",
+    )
+    assert "intake: imessage" in result
+
+
+def test_build_frontmatter_intake_defaults_to_unknown():
+    """Verify intake defaults to 'unknown' when not provided."""
+    result = build_frontmatter(
+        title="Mystery Link",
+        source="https://example.com/test",
+        content_type="web_page",
+        tags=[],
+    )
+    assert "intake: unknown" in result
+
+
+def test_write_obsidian_note_date_subfolder(tmp_path):
+    """Notes should be written to YYYY/MM/DD subfolders when created_at is provided."""
+    import summarizer
+    original = summarizer.OBSIDIAN_CLIPPINGS
+    summarizer.OBSIDIAN_CLIPPINGS = str(tmp_path)
+    try:
+        path = summarizer.write_obsidian_note(
+            title="Test Note",
+            frontmatter="---\ntitle: Test\n---",
+            body="Hello world",
+            created_at="2026-04-06T12:00:00",
+        )
+        assert "/2026/04/06/" in path
+        assert os.path.exists(path)
+        assert path.endswith("Test Note.md")
+    finally:
+        summarizer.OBSIDIAN_CLIPPINGS = original
+
+
+def test_write_obsidian_note_no_date_uses_flat(tmp_path):
+    """Without created_at, notes go to the flat clippings directory."""
+    import summarizer
+    original = summarizer.OBSIDIAN_CLIPPINGS
+    summarizer.OBSIDIAN_CLIPPINGS = str(tmp_path)
+    try:
+        path = summarizer.write_obsidian_note(
+            title="Flat Note",
+            frontmatter="---\ntitle: Flat\n---",
+            body="No date",
+        )
+        assert os.path.dirname(path) == str(tmp_path)
+    finally:
+        summarizer.OBSIDIAN_CLIPPINGS = original
