@@ -43,7 +43,11 @@ except ImportError as _rss_exc:
     logger.warning("RSS db unavailable — pipeline import failed: %s", _rss_exc)
     _RSS_AVAILABLE = False
 
-mcp = FastMCP(config.SERVER_NAME)
+mcp = FastMCP(
+    config.SERVER_NAME,
+    host=config.MCP_SSE_HOST,
+    port=config.MCP_SSE_PORT,
+)
 
 _semantic_index = None
 
@@ -360,6 +364,9 @@ def get_knowledge_document(path: str) -> str:
 
 
 def main() -> None:
+    # Transport: CLI arg > config > default (stdio)
+    transport = sys.argv[1] if len(sys.argv) > 1 else config.MCP_TRANSPORT
+
     if config.ENABLE_HTTP_API:
         index = _get_semantic_index()
         if index is None:
@@ -382,7 +389,9 @@ def main() -> None:
                     logger.exception("HTTP API thread failed to start")
             api_thread = threading.Thread(target=_run_api, daemon=True)
             api_thread.start()
-    mcp.run()
+
+    logger.info("Starting MCP server with transport=%s", transport)
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

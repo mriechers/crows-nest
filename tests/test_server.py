@@ -151,3 +151,42 @@ class TestListTopics:
         counts = {item["category"]: item["document_count"] for item in result}
         assert counts["guides"] == 2
         assert counts["policies"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Transport selection
+# ---------------------------------------------------------------------------
+
+
+class TestTransportSelection:
+    def test_main_accepts_sse_arg(self, monkeypatch):
+        """main() should pass transport arg to mcp.run()."""
+        captured = {}
+        def mock_run(transport="stdio", **kwargs):
+            captured["transport"] = transport
+        monkeypatch.setattr(server_mod.mcp, "run", mock_run)
+        monkeypatch.setattr("sys.argv", ["server", "sse"])
+        server_mod.main()
+        assert captured["transport"] == "sse"
+
+    def test_main_defaults_to_config_transport(self, monkeypatch):
+        """main() should use config.MCP_TRANSPORT when no CLI arg."""
+        captured = {}
+        def mock_run(transport="stdio", **kwargs):
+            captured["transport"] = transport
+        monkeypatch.setattr(server_mod.mcp, "run", mock_run)
+        monkeypatch.setattr("sys.argv", ["server"])
+        monkeypatch.setattr(server_mod.config, "MCP_TRANSPORT", "stdio")
+        server_mod.main()
+        assert captured["transport"] == "stdio"
+
+    def test_main_cli_arg_overrides_config(self, monkeypatch):
+        """CLI arg should override config.MCP_TRANSPORT."""
+        captured = {}
+        def mock_run(transport="stdio", **kwargs):
+            captured["transport"] = transport
+        monkeypatch.setattr(server_mod.mcp, "run", mock_run)
+        monkeypatch.setattr("sys.argv", ["server", "sse"])
+        monkeypatch.setattr(server_mod.config, "MCP_TRANSPORT", "stdio")
+        server_mod.main()
+        assert captured["transport"] == "sse"
