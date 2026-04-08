@@ -49,12 +49,13 @@ def knowledge_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestToolRegistration:
-    def test_seven_tools_registered(self) -> None:
+    def test_all_tools_registered(self) -> None:
         tools = asyncio.run(mcp.list_tools())
         tool_names = {t.name for t in tools}
         expected = {
             "search_knowledge", "list_topics", "get_document", "get_server_info",
-            "semantic_search", "reindex_media", "media_status",
+            "list_recent_articles", "search_articles", "mark_surfaced",
+            "manage_feeds",
         }
         assert expected == tool_names, (
             f"Expected tools {expected}, got {tool_names}"

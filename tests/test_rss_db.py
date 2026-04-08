@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pipeline.db import (
     init_db,
     get_connection,
@@ -10,6 +11,11 @@ from pipeline.db import (
     expire_old_articles,
     list_feeds,
 )
+
+
+def _ago(days: int = 0, hours: int = 0) -> str:
+    """Return an ISO-8601 timestamp *days* and *hours* before now (UTC)."""
+    return (datetime.now(timezone.utc) - timedelta(days=days, hours=hours)).isoformat()
 
 
 def test_add_feed_and_list(tmp_path):
@@ -54,7 +60,7 @@ def test_add_article_and_get_top(tmp_path):
         title="Breaking News",
         url="https://example.com/article-1",
         summary="Something happened",
-        published_at="2026-03-31T10:00:00+00:00",
+        published_at=_ago(hours=6),
         score=5.0,
         db_path=db_path,
     )
@@ -76,7 +82,7 @@ def test_mark_surfaced_excludes_from_top(tmp_path):
         title="Article 1",
         url="https://example.com/1",
         summary="",
-        published_at="2026-03-31T10:00:00+00:00",
+        published_at=_ago(hours=6),
         score=5.0,
         db_path=db_path,
     )
@@ -101,7 +107,7 @@ def test_expire_old_articles(tmp_path):
         title="Old News",
         url="https://example.com/old",
         summary="",
-        published_at="2026-03-01T10:00:00+00:00",
+        published_at=_ago(days=30),
         score=1.0,
         db_path=db_path,
     )
@@ -111,7 +117,7 @@ def test_expire_old_articles(tmp_path):
         title="New News",
         url="https://example.com/new",
         summary="",
-        published_at="2026-03-31T10:00:00+00:00",
+        published_at=_ago(hours=6),
         score=5.0,
         db_path=db_path,
     )
@@ -119,7 +125,7 @@ def test_expire_old_articles(tmp_path):
     deleted = expire_old_articles(max_age_days=14, db_path=db_path)
     assert deleted == 1
 
-    articles = get_top_articles(limit=10, db_path=db_path)
+    articles = get_top_articles(limit=10, max_age_days=14, db_path=db_path)
     assert len(articles) == 1
     assert articles[0]["title"] == "New News"
 
@@ -134,14 +140,14 @@ def test_add_article_deduplicates_by_guid(tmp_path):
     result1 = add_article(
         feed_id=feed_id, guid="same-guid", title="Article",
         url="https://example.com/1", summary="",
-        published_at="2026-03-31T10:00:00+00:00", score=5.0, db_path=db_path,
+        published_at=_ago(hours=6), score=5.0, db_path=db_path,
     )
     assert result1 is not None
 
     result2 = add_article(
         feed_id=feed_id, guid="same-guid", title="Article Duplicate",
         url="https://example.com/2", summary="Different",
-        published_at="2026-03-31T11:00:00+00:00", score=6.0, db_path=db_path,
+        published_at=_ago(hours=5), score=6.0, db_path=db_path,
     )
     assert result2 is None
 
