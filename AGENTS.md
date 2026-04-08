@@ -58,7 +58,7 @@ Or set environment variables with the same names.
 
 ## MCP Knowledge Server
 
-Domain-specific knowledge server (`src/mcp_knowledge/`) with keyword search over curated docs and semantic search over media archive transcripts.
+Domain-specific knowledge server (`src/mcp_knowledge/`) with keyword search over curated docs and RSS feed tools.
 
 ### Keyword Search Tools
 
@@ -66,12 +66,6 @@ Domain-specific knowledge server (`src/mcp_knowledge/`) with keyword search over
 - `list_topics()` — categories with document counts
 - `get_document(path)` — fetch full document by path
 - `get_server_info()` — server metadata
-
-### Semantic Search Tools (requires `pip install -e ".[semantic]"`)
-
-- `semantic_search(query, n_results=10, platform?)` — search media archive transcripts via natural language
-- `reindex_media()` — rebuild semantic index from media archive
-- `media_status()` — semantic index health: document count, collection info
 
 ### Knowledge Structure
 
@@ -99,26 +93,12 @@ media/
       item-title.m4a    # Audio file
 ```
 
-### HTTP API
-
-Optional localhost HTTP API. Enable via `CROWS_NEST_HTTP_API=true` env var.
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/search` | POST | Combined semantic + keyword search (`{query, n_results?, platform?}`) |
-| `/status` | GET | Index health dashboard |
-| `/reindex` | POST | Trigger media archive reindex |
-| `/health` | GET | Liveness check |
-
-Default port: 27185. Override: `CROWS_NEST_HTTP_PORT`.
-
 ## Development
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"              # base + tests
-pip install -e ".[semantic]"         # + ChromaDB, fastembed
 pip install -e ".[archive]"          # + boto3 for R2
 pip install -e ".[all]"              # everything
 pytest tests/

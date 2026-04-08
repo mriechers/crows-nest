@@ -53,16 +53,6 @@ MEDIA_ROOT = os.environ.get(
 )
 
 # ---------------------------------------------------------------------------
-# Semantic search
-# ---------------------------------------------------------------------------
-
-SEMANTIC_DATA_DIR = os.environ.get(
-    "CROWS_NEST_SEMANTIC_DATA",
-    str(Path(os.path.expanduser("~/.local/share/crows-nest/data/chroma"))),
-)
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-
-# ---------------------------------------------------------------------------
 # MCP Transport
 # ---------------------------------------------------------------------------
 
@@ -73,12 +63,3 @@ MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 MCP_SSE_HOST = os.environ.get("MCP_SSE_HOST", "127.0.0.1")
 MCP_SSE_PORT = int(os.environ.get("MCP_SSE_PORT", "27185"))
 
-# ---------------------------------------------------------------------------
-# HTTP API (legacy — separate from MCP transport)
-# ---------------------------------------------------------------------------
-
-ENABLE_HTTP_API = os.environ.get(
-    "CROWS_NEST_HTTP_API", "false"
-).lower() in ("true", "1", "yes")
-HTTP_PORT = int(os.environ.get("CROWS_NEST_HTTP_PORT", "27186"))
-HTTP_HOST = os.environ.get("CROWS_NEST_HTTP_HOST", "127.0.0.1")
