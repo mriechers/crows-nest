@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# post-merge hook: reinstall package when dependencies or source change
+#
+# Runs after `git pull` merges new commits. Checks whether pyproject.toml
+# or any source files changed — if so, reinstalls the package into the
+# local venv so the running MCP server and pipeline always match HEAD.
+#
+# Install: symlink this into your git hooks directory:
+#   ln -sf ../../config/hooks/post-merge "$(git rev-parse --git-dir)/hooks/post-merge"
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+VENV="$REPO_ROOT/.venv"
+
+# Only act if a venv exists
+if [[ ! -d "$VENV" ]]; then
+    exit 0
+fi
+
+# Check if pyproject.toml or source files changed in the merge
+CHANGED_FILES=$(git diff-tree -r --name-only ORIG_HEAD HEAD 2>/dev/null || true)
+
+if echo "$CHANGED_FILES" | grep -qE '(pyproject\.toml|src/|pipeline/)'; then
+    echo "🔄 post-merge: source or dependencies changed, reinstalling..."
+    "$VENV/bin/pip" install -e "$REPO_ROOT" --quiet 2>/dev/null
+    echo "✅ post-merge: reinstall complete"
+fi
