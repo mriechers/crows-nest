@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../pipeline"))
 import db
 import processor
 from db import init_db, add_link, get_connection
-from processor import process_image
+from processor import process_image, extract_thumbnail, fetch_web_content
 
 
 def test_process_web_page_saves_markdown(tmp_path):
@@ -234,6 +234,126 @@ def test_process_image_metadata_has_vault_filenames(tmp_path, monkeypatch):
 
     assert "vault_filenames" in saved_meta
     assert saved_meta["vault_filenames"][0] == "20260319-130000-1.jpg"
+
+
+# ---------------------------------------------------------------------------
+# Thumbnail extraction tests
+# ---------------------------------------------------------------------------
+
+def test_extract_thumbnail_web_page_with_og_image(tmp_path, monkeypatch):
+    """extract_thumbnail downloads og_image for web_page content type."""
+    media_dir = str(tmp_path / "media")
+    os.makedirs(media_dir)
+    thumbnail_path = os.path.join(media_dir, "thumbnail.jpg")
+
+    # Fake minimal JPEG bytes returned by curl
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 2000
+
+    def fake_run(cmd, **kwargs):
+        # Simulate curl writing a file
+        if cmd[0] == "curl" and "-o" in cmd:
+            out_idx = cmd.index("-o") + 1
+            with open(cmd[out_idx], "wb") as f:
+                f.write(fake_jpeg)
+        result = type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+        return result
+
+    monkeypatch.setattr("processor.subprocess.run", fake_run)
+    # resize_image is a no-op in tests (no sips/magick needed)
+    monkeypatch.setattr("processor.resize_image", lambda path, max_dim=800: None)
+
+    metadata = {"og_image": "https://example.com/og.jpg"}
+    result = extract_thumbnail(media_dir, "web_page", metadata)
+
+    assert result is True
+    assert os.path.exists(thumbnail_path)
+
+
+def test_extract_thumbnail_web_page_no_og_image(tmp_path):
+    """extract_thumbnail returns False for web_page with no og_image."""
+    media_dir = str(tmp_path / "media")
+    os.makedirs(media_dir)
+
+    result = extract_thumbnail(media_dir, "web_page", {})
+    assert result is False
+    assert not os.path.exists(os.path.join(media_dir, "thumbnail.jpg"))
+
+
+def test_extract_thumbnail_image_type(tmp_path, monkeypatch):
+    """extract_thumbnail copies the first image to thumbnail.jpg for image content."""
+    media_dir = str(tmp_path / "media")
+    os.makedirs(media_dir)
+
+    # Create a fake image file in media_dir
+    fake_img = os.path.join(media_dir, "20260410-120000-1.jpg")
+    with open(fake_img, "wb") as f:
+        f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 200)
+
+    monkeypatch.setattr("processor.resize_image", lambda path, max_dim=800: None)
+
+    metadata = {"vault_filenames": ["20260410-120000-1.jpg"]}
+    result = extract_thumbnail(media_dir, "image", metadata)
+
+    assert result is True
+    assert os.path.exists(os.path.join(media_dir, "thumbnail.jpg"))
+
+
+def test_extract_thumbnail_audio_skipped(tmp_path):
+    """Audio content type produces no thumbnail."""
+    media_dir = str(tmp_path / "media")
+    os.makedirs(media_dir)
+
+    result = extract_thumbnail(media_dir, "audio", {})
+    assert result is False
+    assert not os.path.exists(os.path.join(media_dir, "thumbnail.jpg"))
+
+
+def test_extract_thumbnail_idempotent(tmp_path):
+    """If thumbnail.jpg already exists, extract_thumbnail returns True without redoing work."""
+    media_dir = str(tmp_path / "media")
+    os.makedirs(media_dir)
+    existing = os.path.join(media_dir, "thumbnail.jpg")
+    with open(existing, "wb") as f:
+        f.write(b"\xff\xd8\xff\xe0")
+
+    result = extract_thumbnail(media_dir, "web_page", {"og_image": "https://example.com/img.jpg"})
+    assert result is True
+    # Verify file wasn't changed (still tiny 4 bytes)
+    assert os.path.getsize(existing) == 4
+
+
+def test_fetch_web_content_returns_og_image(monkeypatch):
+    """fetch_web_content extracts og:image from HTML and returns it as third element."""
+    html = """<html><head>
+    <title>Test Page</title>
+    <meta property="og:image" content="https://example.com/og-img.jpg" />
+    </head><body>Some content here.</body></html>"""
+
+    def fake_run(cmd, **kwargs):
+        return type("R", (), {"returncode": 0, "stdout": html, "stderr": ""})()
+
+    monkeypatch.setattr("processor.subprocess.run", fake_run)
+
+    title, content, og_image = fetch_web_content("https://example.com/test")
+
+    assert title == "Test Page"
+    assert og_image == "https://example.com/og-img.jpg"
+    assert "content" in content.lower() or "Some content" in content
+
+
+def test_fetch_web_content_no_og_image(monkeypatch):
+    """fetch_web_content returns empty string for og_image when tag absent."""
+    html = "<html><head><title>No Image</title></head><body>text</body></html>"
+
+    def fake_run(cmd, **kwargs):
+        return type("R", (), {"returncode": 0, "stdout": html, "stderr": ""})()
+
+    monkeypatch.setattr("processor.subprocess.run", fake_run)
+
+    title, content, og_image = fetch_web_content("https://example.com/noimg")
+
+    assert title == "No Image"
+    assert og_image == ""
 
 
 def test_process_image_run_routing(tmp_path, monkeypatch):

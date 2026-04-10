@@ -5,6 +5,7 @@ Stage 2: picks up pending links, routes by content type, processes them,
 and updates the database status machine.
 """
 
+import argparse
 import json
 import os
 import re
@@ -14,7 +15,7 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 
-from config import WHISPER_SCRIPT, OBSIDIAN_ARCHIVE, convert_heic_to_jpeg, resize_image
+from config import WHISPER_SCRIPT, OBSIDIAN_ARCHIVE, convert_heic_to_jpeg, resize_image, has_command
 from db import init_db, get_connection, get_pending, claim_link, update_status, log_processing
 from content_types import classify_url
 from utils import media_dir_for, sanitize_title, setup_logging
@@ -123,6 +124,10 @@ def process_image(
         transcript_path=metadata_path,
         db_path=db_path,
     )
+
+    # Best-effort thumbnail — resize the first image
+    extract_thumbnail(media_dir, "image", metadata)
+
     log_processing(link_id, "process_image", "success",
                    f"{len(vault_filenames)} images processed", db_path)
     logger.info("link %d: %d images copied to vault and media", link_id, len(vault_filenames))
@@ -132,11 +137,12 @@ def process_image(
 # Web page handler
 # ---------------------------------------------------------------------------
 
-def fetch_web_content(url: str) -> tuple[str, str]:
-    """Fetch a URL with curl and return (title, plain_text).
+def fetch_web_content(url: str) -> tuple[str, str, str]:
+    """Fetch a URL with curl and return (title, plain_text, og_image_url).
 
     Strips <script> and <style> blocks, then all remaining HTML tags.
-    Falls back gracefully on curl failure.
+    Falls back gracefully on curl failure. og_image_url is empty string
+    when no og:image meta tag is found.
     """
     result = subprocess.run(
         ["curl", "-sL", "--max-time", "30", "-A",
@@ -155,6 +161,20 @@ def fetch_web_content(url: str) -> tuple[str, str]:
     title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     title = title_match.group(1).strip() if title_match else url
 
+    # Extract og:image (try both attribute orderings)
+    og_image = ""
+    og_img_match = re.search(
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        html, re.IGNORECASE,
+    )
+    if not og_img_match:
+        og_img_match = re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+            html, re.IGNORECASE,
+        )
+    if og_img_match:
+        og_image = og_img_match.group(1).strip()
+
     # Strip script / style blocks
     cleaned = re.sub(r"<(script|style)[^>]*>.*?</(script|style)>", "", html,
                      flags=re.IGNORECASE | re.DOTALL)
@@ -163,7 +183,7 @@ def fetch_web_content(url: str) -> tuple[str, str]:
     # Collapse whitespace
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
-    return title, cleaned
+    return title, cleaned, og_image
 
 
 def process_web_page(
@@ -173,6 +193,7 @@ def process_web_page(
     title: str,
     media_dir: str,
     db_path: str,
+    og_image: str = "",
 ) -> None:
     """Save fetched web content to disk and update DB to transcribed."""
     article_path = os.path.join(media_dir, "article.md")
@@ -192,6 +213,8 @@ def process_web_page(
         "platform": domain,
         "processed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if og_image:
+        metadata["og_image"] = og_image
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
@@ -202,6 +225,10 @@ def process_web_page(
         transcript_path=article_path,
         db_path=db_path,
     )
+
+    # Best-effort thumbnail from og_image in metadata
+    extract_thumbnail(media_dir, "web_page", metadata)
+
     log_processing(link_id, "process_web_page", "success",
                    f"saved article.md: {article_path}", db_path)
     logger.info("link %d: web page saved to %s", link_id, article_path)
@@ -1054,6 +1081,10 @@ def process_video(
         video_path=video_file or "",
         db_path=db_path,
     )
+
+    # Best-effort thumbnail from the downloaded video file
+    extract_thumbnail(media_dir, content_type, metadata)
+
     log_processing(link_id, "process_video", "success",
                    f"transcript: {transcript_path}", db_path)
     logger.info("link %d: video transcribed to %s", link_id, transcript_path)
@@ -1113,6 +1144,179 @@ def process_audio(
 
 
 # ---------------------------------------------------------------------------
+# Thumbnail extraction
+# ---------------------------------------------------------------------------
+
+THUMBNAIL_FILENAME = "thumbnail.jpg"
+THUMBNAIL_MAX_DIM = 800
+
+
+def extract_thumbnail(media_dir: str, content_type: str, metadata: dict) -> bool:
+    """Extract or copy a representative thumbnail into media_dir/thumbnail.jpg.
+
+    Handles three cases:
+    - video/social_video/youtube/podcast: extract a frame at ~10% via ffmpeg.
+    - image: copy and resize the first vault image as the thumbnail.
+    - web_page: download og_image/thumbnail URL from metadata if present.
+    - audio: skip (no visual to extract).
+
+    Returns True if a thumbnail was successfully created, False otherwise.
+    All failures are non-fatal — logged at WARNING level, never raised.
+    """
+    thumbnail_path = os.path.join(media_dir, THUMBNAIL_FILENAME)
+
+    # Skip if already exists (idempotent re-runs)
+    if os.path.exists(thumbnail_path):
+        return True
+
+    try:
+        if content_type in ("youtube", "social_video", "podcast"):
+            return _extract_video_thumbnail(media_dir, thumbnail_path)
+
+        elif content_type == "image":
+            return _extract_image_thumbnail(media_dir, thumbnail_path, metadata)
+
+        elif content_type == "web_page":
+            return _extract_web_thumbnail(media_dir, thumbnail_path, metadata)
+
+        else:
+            # audio and unknown types: no thumbnail
+            return False
+
+    except Exception as exc:
+        logger.warning("thumbnail extraction failed (non-fatal): %s", exc)
+        return False
+
+
+def _extract_video_thumbnail(media_dir: str, thumbnail_path: str) -> bool:
+    """Extract a frame at ~10% into the video using ffmpeg."""
+    if not has_command("ffmpeg"):
+        logger.info("ffmpeg not available — skipping video thumbnail")
+        return False
+
+    # Find the video file in media_dir
+    video_file = None
+    for name in os.listdir(media_dir):
+        if name.endswith((".mp4", ".mkv", ".webm")):
+            video_file = os.path.join(media_dir, name)
+            break
+
+    if not video_file:
+        logger.info("no video file found for thumbnail extraction")
+        return False
+
+    # Get video duration to compute 10% position
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet", "-print_format", "json",
+                "-show_streams", "-select_streams", "v:0", video_file,
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        duration = 0.0
+        if probe.returncode == 0:
+            probe_data = json.loads(probe.stdout)
+            streams = probe_data.get("streams", [])
+            if streams:
+                duration = float(streams[0].get("duration", 0) or 0)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+        duration = 0.0
+
+    # Use 10% of duration, or 10 seconds if duration unknown
+    seek_secs = max(1, int(duration * 0.10)) if duration > 0 else 10
+
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-ss", str(seek_secs), "-i", video_file,
+                "-vframes", "1", "-q:v", "5",
+                "-vf", f"scale={THUMBNAIL_MAX_DIM}:-2",
+                "-y", thumbnail_path,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("ffmpeg thumbnail extraction timed out for %s", video_file)
+        return False
+
+    if result.returncode == 0 and os.path.exists(thumbnail_path):
+        logger.info("video thumbnail extracted at %ds: %s", seek_secs, thumbnail_path)
+        return True
+    else:
+        logger.warning("ffmpeg thumbnail extraction failed: %s", result.stderr.strip()[:200])
+        return False
+
+
+def _extract_image_thumbnail(media_dir: str, thumbnail_path: str, metadata: dict) -> bool:
+    """Use the first image in the batch as the thumbnail (resized copy)."""
+    import shutil as _shutil
+
+    vault_filenames = metadata.get("vault_filenames", [])
+    if not vault_filenames:
+        # Try any JPEG/PNG directly in media_dir
+        for name in os.listdir(media_dir):
+            if name.lower().endswith((".jpg", ".jpeg", ".png")):
+                vault_filenames = [name]
+                break
+
+    if not vault_filenames:
+        return False
+
+    # Use the copy in media_dir (not the vault copy) — it's already there
+    first_name = vault_filenames[0]
+    src_path = os.path.join(media_dir, first_name)
+    if not os.path.exists(src_path):
+        # Check in OBSIDIAN_ARCHIVE as fallback
+        src_path = os.path.join(OBSIDIAN_ARCHIVE, first_name)
+        if not os.path.exists(src_path):
+            logger.info("source image not found for thumbnail: %s", first_name)
+            return False
+
+    _shutil.copy2(src_path, thumbnail_path)
+    resize_image(thumbnail_path, max_dim=THUMBNAIL_MAX_DIM)
+    logger.info("image thumbnail created from %s", first_name)
+    return True
+
+
+def _extract_web_thumbnail(media_dir: str, thumbnail_path: str, metadata: dict) -> bool:
+    """Download og_image or thumbnail URL from web page metadata."""
+    image_url = metadata.get("og_image") or metadata.get("thumbnail") or ""
+    if not image_url or not image_url.startswith("http"):
+        return False
+
+    try:
+        result = subprocess.run(
+            [
+                "curl", "-sL", "--max-time", "15",
+                "-A", "Mozilla/5.0 (compatible; crows-nest/1.0)",
+                "-o", thumbnail_path, image_url,
+            ],
+            capture_output=True, text=True, timeout=20,
+        )
+        if result.returncode == 0 and os.path.exists(thumbnail_path):
+            file_size = os.path.getsize(thumbnail_path)
+            if file_size < 1000:
+                # Likely an error page or redirect, not a real image
+                os.remove(thumbnail_path)
+                logger.info("web thumbnail too small (%d bytes), discarding", file_size)
+                return False
+            resize_image(thumbnail_path, max_dim=THUMBNAIL_MAX_DIM)
+            logger.info("web thumbnail downloaded from %s", image_url[:80])
+            return True
+        else:
+            if os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
+            logger.info("web thumbnail download failed: %s", result.stderr.strip()[:100])
+            return False
+    except subprocess.TimeoutExpired:
+        if os.path.exists(thumbnail_path):
+            os.remove(thumbnail_path)
+        logger.info("web thumbnail download timed out")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Stale claim recovery
 # ---------------------------------------------------------------------------
 
@@ -1149,96 +1353,147 @@ def recover_stale_claims(db_path: str, stale_minutes: int = 30) -> None:
 # Main loop
 # ---------------------------------------------------------------------------
 
-def run(db_path: str) -> None:
-    """Claim and process pending links, routing by content type."""
+def run(db_path: str, limit: int = 20, drain: bool = False) -> None:
+    """Claim and process pending links, routing by content type.
+
+    Args:
+        db_path: Path to the SQLite database.
+        limit: Maximum number of links to process per batch (default: 20).
+        drain: If True, keep processing batches until no pending items remain.
+    """
     init_db(db_path)
     recover_stale_claims(db_path)
 
-    pending = get_pending(status="pending", limit=20, db_path=db_path)
-    logger.info("found %d pending link(s)", len(pending))
+    failed_ids: set[int] = set()
+    iteration = 0
+    max_drain_iterations = 50
+    while True:
+        iteration += 1
+        if drain and iteration > max_drain_iterations:
+            logger.warning(
+                "drain safety limit reached (%d iterations) — stopping",
+                max_drain_iterations,
+            )
+            break
+        if drain:
+            logger.info("drain iteration %d: fetching up to %d pending link(s)", iteration, limit)
 
-    for link in pending:
-        link_id = link["id"]
-        url = link["url"]
-        content_type = link.get("content_type") or classify_url(url)
-        context = link.get("context") or ""
+        pending = get_pending(status="pending", limit=limit, db_path=db_path)
+        if drain:
+            pending = [l for l in pending if l["id"] not in failed_ids]
+        logger.info("found %d pending link(s)", len(pending))
 
-        claimed = claim_link(link_id, from_status="pending",
-                             to_status="downloading", db_path=db_path)
-        if not claimed:
-            logger.info("link %d: already claimed by another worker, skipping", link_id)
-            continue
+        if not pending:
+            if drain and iteration > 1:
+                logger.info("drain complete: no more pending items after %d iteration(s)", iteration - 1)
+            break
 
-        logger.info("link %d: processing %s (%s)", link_id, url, content_type)
+        for link in pending:
+            link_id = link["id"]
+            url = link["url"]
+            content_type = link.get("content_type") or classify_url(url)
+            context = link.get("context") or ""
 
-        try:
-            if content_type == "web_page":
-                title, content = fetch_web_content(url)
-                mdir = media_dir_for(title)
-                process_web_page(link_id, url, content, title, mdir, db_path)
+            claimed = claim_link(link_id, from_status="pending",
+                                 to_status="downloading", db_path=db_path)
+            if not claimed:
+                logger.info("link %d: already claimed by another worker, skipping", link_id)
+                continue
 
-            elif content_type in ("youtube", "social_video", "podcast"):
-                # Podcasts use yt-dlp too — it handles Apple Podcasts,
-                # Spotify, and other platform pages.  Direct audio URLs
-                # are classified as "audio" instead.
-                mdir = media_dir_for(sanitize_title(url))
-                process_video(link_id, url, content_type, mdir, context, db_path)
+            logger.info("link %d: processing %s (%s)", link_id, url, content_type)
 
-            elif content_type == "audio":
-                mdir = media_dir_for(sanitize_title(url))
-                process_audio(link_id, url, mdir, context, db_path)
-
-            elif content_type == "image":
-                link_meta = json.loads(link.get("metadata") or "{}")
-                ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-                mdir = media_dir_for(ts)
-                process_image(link_id, mdir, link_meta, context, ts, db_path)
-
-            else:
-                # Unknown — treat as web page
-                logger.warning("link %d: unknown content_type '%s', treating as web_page",
-                               link_id, content_type)
-                title, content = fetch_web_content(url)
-                mdir = media_dir_for(title)
-                process_web_page(link_id, url, content, title, mdir, db_path)
-
-        except Exception as exc:
-            error_msg = str(exc)
-            logger.error("link %d: error — %s", link_id, error_msg)
-
-            # Re-read current retry_count from DB
-            conn = get_connection(db_path)
             try:
-                row = conn.execute(
-                    "SELECT retry_count FROM links WHERE id = ?", (link_id,)
-                ).fetchone()
-                current_retries = row["retry_count"] if row else 0
-            finally:
-                conn.close()
+                if content_type == "web_page":
+                    title, content, og_image = fetch_web_content(url)
+                    mdir = media_dir_for(title)
+                    process_web_page(link_id, url, content, title, mdir, db_path, og_image=og_image)
 
-            new_retries = current_retries + 1
-            if new_retries < MAX_RETRIES:
-                update_status(
-                    link_id=link_id,
-                    status="pending",
-                    retry_count=new_retries,
-                    error=error_msg,
-                    db_path=db_path,
-                )
-                logger.warning("link %d: retry %d/%d", link_id, new_retries, MAX_RETRIES)
-            else:
-                update_status(
-                    link_id=link_id,
-                    status="failed",
-                    retry_count=new_retries,
-                    error=error_msg,
-                    db_path=db_path,
-                )
-                logger.error("link %d: max retries reached, marked failed", link_id)
+                elif content_type in ("youtube", "social_video", "podcast"):
+                    # Podcasts use yt-dlp too — it handles Apple Podcasts,
+                    # Spotify, and other platform pages.  Direct audio URLs
+                    # are classified as "audio" instead.
+                    mdir = media_dir_for(sanitize_title(url))
+                    process_video(link_id, url, content_type, mdir, context, db_path)
 
-            log_processing(link_id, "processor", "error", error_msg, db_path)
+                elif content_type == "audio":
+                    mdir = media_dir_for(sanitize_title(url))
+                    process_audio(link_id, url, mdir, context, db_path)
+
+                elif content_type == "image":
+                    link_meta = json.loads(link.get("metadata") or "{}")
+                    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                    mdir = media_dir_for(ts)
+                    process_image(link_id, mdir, link_meta, context, ts, db_path)
+
+                else:
+                    # Unknown — treat as web page
+                    logger.warning("link %d: unknown content_type '%s', treating as web_page",
+                                   link_id, content_type)
+                    title, content, og_image = fetch_web_content(url)
+                    mdir = media_dir_for(title)
+                    process_web_page(link_id, url, content, title, mdir, db_path, og_image=og_image)
+
+            except Exception as exc:
+                error_msg = str(exc)
+                logger.error("link %d: error — %s", link_id, error_msg)
+                failed_ids.add(link_id)
+
+                # Re-read current retry_count from DB
+                conn = get_connection(db_path)
+                try:
+                    row = conn.execute(
+                        "SELECT retry_count FROM links WHERE id = ?", (link_id,)
+                    ).fetchone()
+                    current_retries = row["retry_count"] if row else 0
+                finally:
+                    conn.close()
+
+                new_retries = current_retries + 1
+                if new_retries < MAX_RETRIES:
+                    update_status(
+                        link_id=link_id,
+                        status="pending",
+                        retry_count=new_retries,
+                        error=error_msg,
+                        db_path=db_path,
+                    )
+                    logger.warning("link %d: retry %d/%d", link_id, new_retries, MAX_RETRIES)
+                else:
+                    update_status(
+                        link_id=link_id,
+                        status="failed",
+                        retry_count=new_retries,
+                        error=error_msg,
+                        db_path=db_path,
+                    )
+                    logger.error("link %d: max retries reached, marked failed", link_id)
+
+                log_processing(link_id, "processor", "error", error_msg, db_path)
+
+        if not drain:
+            break
 
 
 if __name__ == "__main__":
     from db import DB_PATH
-    run(DB_PATH)
+
+    parser = argparse.ArgumentParser(description="Crow's Nest content processor")
+    parser.add_argument(
+        "--db",
+        default=DB_PATH,
+        help="Path to the SQLite database (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of pending items to process per batch (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--drain",
+        action="store_true",
+        default=False,
+        help="Keep processing batches until no pending items remain",
+    )
+    args = parser.parse_args()
+    run(args.db, limit=args.limit, drain=args.drain)
