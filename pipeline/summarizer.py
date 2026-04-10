@@ -135,6 +135,7 @@ def generate_note_content(
     sender: str = None,
     saved_at: str = None,
     extracted_text: str = None,
+    thumbnail_filename: str = None,
 ) -> str:
     """Build the Markdown body for an Obsidian clipping note."""
     metadata = metadata or {}
@@ -144,6 +145,11 @@ def generate_note_content(
     if sender:
         saved_date = saved_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         sections.append(f"> [!info] Shared via Signal\n> Sent by **{sender}** on {saved_date}")
+
+    # Thumbnail embed — inserted after sender callout, before summary
+    # Skipped for image content (those use vault_filenames embeds below)
+    if thumbnail_filename and content_type != "image":
+        sections.append(f"![[{thumbnail_filename}]]")
 
     # Image embeds — inserted between sender callout and summary
     if content_type == "image":
@@ -810,6 +816,60 @@ def _extract_json(text: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Thumbnail helper
+# ---------------------------------------------------------------------------
+
+def _copy_thumbnail_to_archive(
+    transcript_path: str,
+    title: str,
+    content_type: str,
+) -> str | None:
+    """Check for thumbnail.jpg in the item's media directory and copy it to
+    OBSIDIAN_ARCHIVE with a unique, note-scoped filename.
+
+    Returns the vault filename (e.g. "my-title-thumb.jpg") on success,
+    or None if no thumbnail exists. Never raises.
+    """
+    import shutil as _shutil
+
+    if not transcript_path:
+        return None
+
+    # Derive the media_dir from the transcript path.
+    # transcript_path is typically <media_dir>/transcript.txt or
+    # <media_dir>/article.md or <media_dir>/metadata.json.
+    media_dir = os.path.dirname(transcript_path)
+    thumbnail_src = os.path.join(media_dir, "thumbnail.jpg")
+
+    if not os.path.exists(thumbnail_src):
+        return None
+
+    try:
+        os.makedirs(OBSIDIAN_ARCHIVE, exist_ok=True)
+
+        # Build a stable, note-scoped filename that won't collide across items.
+        from utils import sanitize_title as _san
+        safe = _san(title, max_length=60) or "clip"
+        base_name = f"{safe}-thumb.jpg"
+        dest_path = os.path.join(OBSIDIAN_ARCHIVE, base_name)
+
+        # Avoid clobbering an existing file with a different image
+        counter = 1
+        while os.path.exists(dest_path):
+            dest_path = os.path.join(OBSIDIAN_ARCHIVE, f"{safe}-thumb-{counter}.jpg")
+            counter += 1
+
+        _shutil.copy2(thumbnail_src, dest_path)
+        vault_filename = os.path.basename(dest_path)
+        logger.info("thumbnail copied to vault archive: %s", vault_filename)
+        return vault_filename
+
+    except Exception as exc:
+        logger.warning("failed to copy thumbnail to archive (non-fatal): %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Note writer
 # ---------------------------------------------------------------------------
 
@@ -1031,185 +1091,228 @@ def _append_to_weekly_log(
 # Main loop
 # ---------------------------------------------------------------------------
 
-def run(db_path: str) -> None:
+def run(db_path: str, limit: int = 5, drain: bool = False) -> None:
     """Claim transcribed links, summarize, and write Obsidian notes."""
-    links = get_pending(status="transcribed", limit=5, db_path=db_path)
-    logger.info("found %d transcribed link(s)", len(links))
+    iteration = 0
+    while True:
+        iteration += 1
+        if drain:
+            logger.info("drain iteration %d: fetching up to %d transcribed link(s)", iteration, limit)
+        links = get_pending(status="transcribed", limit=limit, db_path=db_path)
+        logger.info("found %d transcribed link(s)", len(links))
 
-    for link in links:
-        link_id = link["id"]
-        url = link["url"]
-        content_type = link.get("content_type") or "web_page"
-        sender = link.get("sender")
-        transcript_path = link.get("transcript_path")
+        if not links:
+            if drain and iteration > 1:
+                logger.info("drain complete: no more transcribed links")
+            break
 
-        claimed = claim_link(
-            link_id, from_status="transcribed", to_status="summarizing", db_path=db_path
-        )
-        if not claimed:
-            logger.info("link %d: already claimed, skipping", link_id)
-            continue
-
-        logger.info("link %d: summarizing %s (%s)", link_id, url, content_type)
-
-        try:
-            # Read transcript / metadata
-            if not transcript_path or not os.path.exists(transcript_path):
-                raise RuntimeError(
-                    f"transcript file not found: {transcript_path!r}"
-                )
-
-            extracted_text = None
-
-            if content_type == "image":
-                # For images, transcript_path IS the metadata.json
-                with open(transcript_path, "r", encoding="utf-8") as f:
-                    metadata = json.load(f)
-
-                transcript_text = ""
-
-                # Build absolute paths to the resized vault copies
-                vault_filenames = metadata.get("vault_filenames", [])
-                image_paths = [
-                    os.path.join(OBSIDIAN_ARCHIVE, fn) for fn in vault_filenames
-                ]
-
-                context = metadata.get("context") or link.get("context") or ""
-                claude_result = call_claude_for_image_analysis(
-                    image_paths=image_paths,
-                    context=context,
-                    sender=sender,
-                )
-                extracted_text = claude_result.get("extracted_text", "")
-
-            else:
-                with open(transcript_path, "r", encoding="utf-8") as f:
-                    transcript_text = f.read()
-
-                # Load metadata if available — check transcript dir and parent
-                metadata = {}
-                for search_dir in [os.path.dirname(transcript_path),
-                                   os.path.dirname(os.path.dirname(transcript_path))]:
-                    metadata_path = os.path.join(search_dir, "metadata.json")
-                    if os.path.exists(metadata_path):
-                        with open(metadata_path, "r", encoding="utf-8") as f:
-                            metadata = json.load(f)
-                        break
-
-                # Call Claude — pass sender and creator so it can separate them
+        for link in links:
+            link_id = link["id"]
+            url = link["url"]
+            content_type = link.get("content_type") or "web_page"
+            sender = link.get("sender")
+            transcript_path = link.get("transcript_path")
+    
+            claimed = claim_link(
+                link_id, from_status="transcribed", to_status="summarizing", db_path=db_path
+            )
+            if not claimed:
+                logger.info("link %d: already claimed, skipping", link_id)
+                continue
+    
+            logger.info("link %d: summarizing %s (%s)", link_id, url, content_type)
+    
+            try:
+                # Read transcript / metadata
+                if not transcript_path or not os.path.exists(transcript_path):
+                    raise RuntimeError(
+                        f"transcript file not found: {transcript_path!r}"
+                    )
+    
+                extracted_text = None
+    
+                if content_type == "image":
+                    # For images, transcript_path IS the metadata.json
+                    with open(transcript_path, "r", encoding="utf-8") as f:
+                        metadata = json.load(f)
+    
+                    transcript_text = ""
+    
+                    # Build absolute paths to the resized vault copies
+                    vault_filenames = metadata.get("vault_filenames", [])
+                    image_paths = [
+                        os.path.join(OBSIDIAN_ARCHIVE, fn) for fn in vault_filenames
+                    ]
+    
+                    context = metadata.get("context") or link.get("context") or ""
+                    claude_result = call_claude_for_image_analysis(
+                        image_paths=image_paths,
+                        context=context,
+                        sender=sender,
+                    )
+                    extracted_text = claude_result.get("extracted_text", "")
+    
+                else:
+                    with open(transcript_path, "r", encoding="utf-8") as f:
+                        transcript_text = f.read()
+    
+                    # Load metadata if available — check transcript dir and parent
+                    metadata = {}
+                    for search_dir in [os.path.dirname(transcript_path),
+                                       os.path.dirname(os.path.dirname(transcript_path))]:
+                        metadata_path = os.path.join(search_dir, "metadata.json")
+                        if os.path.exists(metadata_path):
+                            with open(metadata_path, "r", encoding="utf-8") as f:
+                                metadata = json.load(f)
+                            break
+    
+                    # Call Claude — pass sender and creator so it can separate them
+                    creator = metadata.get("creator") or ""
+                    title_hint = (
+                        metadata.get("title")
+                        or link.get("context")
+                        or sanitize_title(url)
+                        or "untitled"
+                    )
+                    claude_result = call_claude_for_summary(
+                        content=transcript_text,
+                        content_type=content_type,
+                        title=title_hint,
+                        sender=sender,
+                        creator=creator,
+                    )
+    
+                # Enrich with creator search for unnamed artifacts
                 creator = metadata.get("creator") or ""
+                claude_result = enrich_with_creator_search(
+                    claude_result, creator, metadata
+                )
+    
+                # Use metadata title for images, AI title otherwise
                 title_hint = (
                     metadata.get("title")
                     or link.get("context")
                     or sanitize_title(url)
                     or "untitled"
                 )
-                claude_result = call_claude_for_summary(
-                    content=transcript_text,
+    
+                # Use AI-generated title if available, otherwise fall back.
+                # Reject titles that are model reasoning, not headlines.
+                ai_title = claude_result.get("title", "")
+                if ai_title and any(ai_title.lower().startswith(p) for p in (
+                    "i cannot", "i can't", "i could not", "i don't", "i do not",
+                    "i was unable", "i wasn't able", "based on", "unfortunately",
+                )):
+                    logger.warning("AI title looks like reasoning, using hint: '%s'", ai_title[:80])
+                    ai_title = ""
+                title = ai_title or title_hint
+    
+                # Check for a thumbnail extracted during processing and copy it
+                # to the vault archive so Obsidian can embed it.
+                thumbnail_filename = _copy_thumbnail_to_archive(
+                    transcript_path=transcript_path,
+                    title=title,
                     content_type=content_type,
-                    title=title_hint,
-                    sender=sender,
-                    creator=creator,
                 )
 
-            # Enrich with creator search for unnamed artifacts
-            creator = metadata.get("creator") or ""
-            claude_result = enrich_with_creator_search(
-                claude_result, creator, metadata
-            )
-
-            # Use metadata title for images, AI title otherwise
-            title_hint = (
-                metadata.get("title")
-                or link.get("context")
-                or sanitize_title(url)
-                or "untitled"
-            )
-
-            # Use AI-generated title if available, otherwise fall back.
-            # Reject titles that are model reasoning, not headlines.
-            ai_title = claude_result.get("title", "")
-            if ai_title and any(ai_title.lower().startswith(p) for p in (
-                "i cannot", "i can't", "i could not", "i don't", "i do not",
-                "i was unable", "i wasn't able", "based on", "unfortunately",
-            )):
-                logger.warning("AI title looks like reasoning, using hint: '%s'", ai_title[:80])
-                ai_title = ""
-            title = ai_title or title_hint
-
-            # Build note
-            frontmatter = build_frontmatter(
-                title=title,
-                source=url,
-                content_type=content_type,
-                tags=claude_result.get("tags", []),
-                sender=sender,
-                metadata=metadata,
-                intake=link.get("source_type") or "unknown",
-            )
-
-            body = generate_note_content(
-                title=title,
-                source_url=url,
-                content_type=content_type,
-                summary=claude_result.get("summary", ""),
-                key_points=claude_result.get("key_points", []),
-                transcript_text=transcript_text,
-                metadata=metadata,
-                notable_quotes=claude_result.get("notable_quotes"),
-                people=claude_result.get("people"),
-                related_links=claude_result.get("related_links"),
-                followups=claude_result.get("followups"),
-                sender=sender,
-                saved_at=link.get("created_at", "")[:10] if link.get("created_at") else None,
-                extracted_text=extracted_text,
-            )
-
-            note_path = write_obsidian_note(
-                title, frontmatter, body,
-                created_at=link.get("created_at"),
-            )
-            note_title = os.path.splitext(os.path.basename(note_path))[0]
-
-            try:
-                _append_to_weekly_log(
-                    inbox_dir=os.path.join(OBSIDIAN_VAULT, "0 - INBOX"),
-                    title=note_title,
-                    url=link["url"],
-                    content_type=link["content_type"] or "web_page",
-                    source=link.get("sender") or link.get("source_type") or "unknown",
+                # Build note
+                frontmatter = build_frontmatter(
+                    title=title,
+                    source=url,
+                    content_type=content_type,
                     tags=claude_result.get("tags", []),
+                    sender=sender,
+                    metadata=metadata,
+                    intake=link.get("source_type") or "unknown",
                 )
-            except Exception as e:
-                logger.warning("Failed to append to weekly log: %s", e)
 
-            update_status(
-                link_id=link_id,
-                status="summarized",
-                obsidian_note_path=note_path,
-                db_path=db_path,
-            )
-            log_processing(
-                link_id, "summarizer", "success", f"note: {note_path}", db_path
-            )
-            logger.info("link %d: summarized -> %s", link_id, note_path)
+                body = generate_note_content(
+                    title=title,
+                    source_url=url,
+                    content_type=content_type,
+                    summary=claude_result.get("summary", ""),
+                    key_points=claude_result.get("key_points", []),
+                    transcript_text=transcript_text,
+                    metadata=metadata,
+                    notable_quotes=claude_result.get("notable_quotes"),
+                    people=claude_result.get("people"),
+                    related_links=claude_result.get("related_links"),
+                    followups=claude_result.get("followups"),
+                    sender=sender,
+                    saved_at=link.get("created_at", "")[:10] if link.get("created_at") else None,
+                    extracted_text=extracted_text,
+                    thumbnail_filename=thumbnail_filename,
+                )
+    
+                note_path = write_obsidian_note(
+                    title, frontmatter, body,
+                    created_at=link.get("created_at"),
+                )
+                note_title = os.path.splitext(os.path.basename(note_path))[0]
+    
+                try:
+                    _append_to_weekly_log(
+                        inbox_dir=os.path.join(OBSIDIAN_VAULT, "0 - INBOX"),
+                        title=note_title,
+                        url=link["url"],
+                        content_type=link["content_type"] or "web_page",
+                        source=link.get("sender") or link.get("source_type") or "unknown",
+                        tags=claude_result.get("tags", []),
+                    )
+                except Exception as e:
+                    logger.warning("Failed to append to weekly log: %s", e)
+    
+                update_status(
+                    link_id=link_id,
+                    status="summarized",
+                    obsidian_note_path=note_path,
+                    db_path=db_path,
+                )
+                log_processing(
+                    link_id, "summarizer", "success", f"note: {note_path}", db_path
+                )
+                logger.info("link %d: summarized -> %s", link_id, note_path)
+    
+            except Exception as exc:
+                error_msg = str(exc)
+                logger.error("link %d: error — %s", link_id, error_msg)
+                update_status(
+                    link_id=link_id,
+                    status="transcribed",
+                    error=error_msg,
+                    db_path=db_path,
+                )
+                log_processing(link_id, "summarizer", "error", error_msg, db_path)
+    
+            # Brief pause between API calls to avoid rate limiting
+            if len(links) > 1:
+                time.sleep(2)
 
-        except Exception as exc:
-            error_msg = str(exc)
-            logger.error("link %d: error — %s", link_id, error_msg)
-            update_status(
-                link_id=link_id,
-                status="transcribed",
-                error=error_msg,
-                db_path=db_path,
-            )
-            log_processing(link_id, "summarizer", "error", error_msg, db_path)
-
-        # Brief pause between API calls to avoid rate limiting
-        if len(links) > 1:
-            time.sleep(2)
+        if not drain:
+            break
 
 
 if __name__ == "__main__":
+    import argparse
     from db import DB_PATH
-    run(DB_PATH)
+
+    parser = argparse.ArgumentParser(description="Crow's Nest summarizer")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of items to process per batch (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--drain",
+        action="store_true",
+        default=False,
+        help="Keep processing until no transcribed items remain",
+    )
+    parser.add_argument(
+        "--db",
+        default=DB_PATH,
+        help="Path to the SQLite database (default: %(default)s)",
+    )
+    args = parser.parse_args()
+    run(args.db, limit=args.limit, drain=args.drain)
