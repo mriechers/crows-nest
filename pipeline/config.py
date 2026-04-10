@@ -70,14 +70,14 @@ INGEST_API_URL = os.environ.get(
 # Image processing — platform-adaptive
 # ---------------------------------------------------------------------------
 
-def _has_command(name: str) -> bool:
+def has_command(name: str) -> bool:
     """Check if a command is available on PATH."""
     return shutil.which(name) is not None
 
 
 IS_MACOS = sys.platform == "darwin"
-HAS_SIPS = IS_MACOS and _has_command("sips")
-HAS_MAGICK = _has_command("magick") or _has_command("convert")
+HAS_SIPS = IS_MACOS and has_command("sips")
+HAS_MAGICK = has_command("magick") or has_command("convert")
 
 
 def convert_heic_to_jpeg(src: str, dst: str) -> None:
@@ -88,7 +88,7 @@ def convert_heic_to_jpeg(src: str, dst: str) -> None:
             capture_output=True, text=True, timeout=30,
         )
     elif HAS_MAGICK:
-        cmd = "magick" if _has_command("magick") else "convert"
+        cmd = "magick" if has_command("magick") else "convert"
         subprocess.run(
             [cmd, src, dst],
             capture_output=True, text=True, timeout=30,
@@ -108,7 +108,7 @@ def resize_image(path: str, max_dim: int = 1568) -> None:
             capture_output=True, text=True, timeout=30,
         )
     elif HAS_MAGICK:
-        cmd = "magick" if _has_command("magick") else "convert"
+        cmd = "magick" if has_command("magick") else "convert"
         subprocess.run(
             [cmd, path, "-resize", f"{max_dim}x{max_dim}>", path],
             capture_output=True, text=True, timeout=30,

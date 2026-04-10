@@ -855,9 +855,12 @@ def _copy_thumbnail_to_archive(
 
         # Avoid clobbering an existing file with a different image
         counter = 1
-        while os.path.exists(dest_path):
+        while os.path.exists(dest_path) and counter < 100:
             dest_path = os.path.join(OBSIDIAN_ARCHIVE, f"{safe}-thumb-{counter}.jpg")
             counter += 1
+        if os.path.exists(dest_path):
+            logger.warning("too many thumbnail collisions for %s — skipping", safe)
+            return None
 
         _shutil.copy2(thumbnail_src, dest_path)
         vault_filename = os.path.basename(dest_path)
@@ -1093,12 +1096,22 @@ def _append_to_weekly_log(
 
 def run(db_path: str, limit: int = 5, drain: bool = False) -> None:
     """Claim transcribed links, summarize, and write Obsidian notes."""
+    failed_ids: set[int] = set()
     iteration = 0
+    max_drain_iterations = 50
     while True:
         iteration += 1
+        if drain and iteration > max_drain_iterations:
+            logger.warning(
+                "drain safety limit reached (%d iterations) — stopping",
+                max_drain_iterations,
+            )
+            break
         if drain:
             logger.info("drain iteration %d: fetching up to %d transcribed link(s)", iteration, limit)
         links = get_pending(status="transcribed", limit=limit, db_path=db_path)
+        if drain:
+            links = [l for l in links if l["id"] not in failed_ids]
         logger.info("found %d transcribed link(s)", len(links))
 
         if not links:
@@ -1276,6 +1289,7 @@ def run(db_path: str, limit: int = 5, drain: bool = False) -> None:
             except Exception as exc:
                 error_msg = str(exc)
                 logger.error("link %d: error — %s", link_id, error_msg)
+                failed_ids.add(link_id)
                 update_status(
                     link_id=link_id,
                     status="transcribed",

@@ -39,7 +39,7 @@ URLs are extracted and saved to SQLite with status `pending`. Signal sends a con
 Routes each item by content type and processes it:
 - **YouTube / social video**: yt-dlp download, audio extraction via ffmpeg, Whisper transcription, thumbnail extraction
 - **Podcast / audio**: yt-dlp download, Whisper transcription
-- **Web pages**: requests-based scraping, og_image thumbnail download
+- **Web pages**: HTTP scraping, og_image thumbnail download
 - **Images**: HEIC-to-JPEG conversion (sips or ImageMagick), resize to 1568px longest edge
 
 ```bash

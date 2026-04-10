@@ -28,8 +28,8 @@ def _get_dir_size(path: str) -> int:
             filepath = os.path.join(dirpath, filename)
             try:
                 total += os.path.getsize(filepath)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Could not stat %s: %s", filepath, exc)
     return total
 
 
@@ -76,6 +76,10 @@ def resolve_media_dir(download_path: str) -> str | None:
     outside of it.
     """
     if not download_path:
+        return None
+
+    if not os.path.isabs(download_path):
+        logger.warning("download_path %r is relative — skipping", download_path)
         return None
 
     # If it points to a file, use the parent directory
@@ -230,4 +234,6 @@ if __name__ == "__main__":
         help="Print what would be deleted without actually deleting anything",
     )
     args = parser.parse_args()
+    if args.days < 1:
+        parser.error("--days must be at least 1")
     run(db_path=args.db, days=args.days, dry_run=args.dry_run)

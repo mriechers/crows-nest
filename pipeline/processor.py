@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 
-from config import WHISPER_SCRIPT, OBSIDIAN_ARCHIVE, convert_heic_to_jpeg, resize_image, _has_command
+from config import WHISPER_SCRIPT, OBSIDIAN_ARCHIVE, convert_heic_to_jpeg, resize_image, has_command
 from db import init_db, get_connection, get_pending, claim_link, update_status, log_processing
 from content_types import classify_url
 from utils import media_dir_for, sanitize_title, setup_logging
@@ -1163,8 +1163,6 @@ def extract_thumbnail(media_dir: str, content_type: str, metadata: dict) -> bool
     Returns True if a thumbnail was successfully created, False otherwise.
     All failures are non-fatal — logged at WARNING level, never raised.
     """
-    import shutil as _shutil
-
     thumbnail_path = os.path.join(media_dir, THUMBNAIL_FILENAME)
 
     # Skip if already exists (idempotent re-runs)
@@ -1192,7 +1190,7 @@ def extract_thumbnail(media_dir: str, content_type: str, metadata: dict) -> bool
 
 def _extract_video_thumbnail(media_dir: str, thumbnail_path: str) -> bool:
     """Extract a frame at ~10% into the video using ffmpeg."""
-    if not _has_command("ffmpeg"):
+    if not has_command("ffmpeg"):
         logger.info("ffmpeg not available — skipping video thumbnail")
         return False
 
@@ -1228,15 +1226,19 @@ def _extract_video_thumbnail(media_dir: str, thumbnail_path: str) -> bool:
     # Use 10% of duration, or 10 seconds if duration unknown
     seek_secs = max(1, int(duration * 0.10)) if duration > 0 else 10
 
-    result = subprocess.run(
-        [
-            "ffmpeg", "-ss", str(seek_secs), "-i", video_file,
-            "-vframes", "1", "-q:v", "5",
-            "-vf", f"scale={THUMBNAIL_MAX_DIM}:-2",
-            "-y", thumbnail_path,
-        ],
-        capture_output=True, text=True, timeout=30,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-ss", str(seek_secs), "-i", video_file,
+                "-vframes", "1", "-q:v", "5",
+                "-vf", f"scale={THUMBNAIL_MAX_DIM}:-2",
+                "-y", thumbnail_path,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("ffmpeg thumbnail extraction timed out for %s", video_file)
+        return False
 
     if result.returncode == 0 and os.path.exists(thumbnail_path):
         logger.info("video thumbnail extracted at %ds: %s", seek_secs, thumbnail_path)
@@ -1303,9 +1305,13 @@ def _extract_web_thumbnail(media_dir: str, thumbnail_path: str, metadata: dict) 
             logger.info("web thumbnail downloaded from %s", image_url[:80])
             return True
         else:
+            if os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
             logger.info("web thumbnail download failed: %s", result.stderr.strip()[:100])
             return False
     except subprocess.TimeoutExpired:
+        if os.path.exists(thumbnail_path):
+            os.remove(thumbnail_path)
         logger.info("web thumbnail download timed out")
         return False
 
@@ -1358,13 +1364,23 @@ def run(db_path: str, limit: int = 20, drain: bool = False) -> None:
     init_db(db_path)
     recover_stale_claims(db_path)
 
+    failed_ids: set[int] = set()
     iteration = 0
+    max_drain_iterations = 50
     while True:
         iteration += 1
+        if drain and iteration > max_drain_iterations:
+            logger.warning(
+                "drain safety limit reached (%d iterations) — stopping",
+                max_drain_iterations,
+            )
+            break
         if drain:
             logger.info("drain iteration %d: fetching up to %d pending link(s)", iteration, limit)
 
         pending = get_pending(status="pending", limit=limit, db_path=db_path)
+        if drain:
+            pending = [l for l in pending if l["id"] not in failed_ids]
         logger.info("found %d pending link(s)", len(pending))
 
         if not pending:
@@ -1420,6 +1436,7 @@ def run(db_path: str, limit: int = 20, drain: bool = False) -> None:
             except Exception as exc:
                 error_msg = str(exc)
                 logger.error("link %d: error — %s", link_id, error_msg)
+                failed_ids.add(link_id)
 
                 # Re-read current retry_count from DB
                 conn = get_connection(db_path)
