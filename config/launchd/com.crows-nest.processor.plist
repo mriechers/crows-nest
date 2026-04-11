@@ -37,5 +37,14 @@
 
     <key>ProcessType</key>
     <string>Background</string>
+
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>LowPriorityBackgroundIO</key>
+    <true/>
 </dict>
 </plist>
