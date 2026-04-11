@@ -186,7 +186,13 @@ def check_log_freshness() -> list[str]:
 
 
 def check_signal_health() -> list[str]:
-    """Check signal-cli health from the listener's health status file."""
+    """Check signal-cli health from the listener's health status file.
+
+    Recognised statuses:
+        ok        — most recent poll succeeded
+        error     — most recent poll failed (transient)
+        degraded  — 3+ consecutive polls failed (needs user intervention)
+    """
     problems = []
     if not os.path.exists(SIGNAL_HEALTH_FILE):
         problems.append("signal-cli: health file missing (listener may not have run yet)")
@@ -199,10 +205,37 @@ def check_signal_health() -> list[str]:
         return problems
 
     status = data.get("status")
-    if status == "error":
-        error_type = data.get("error", "unknown")
-        message = data.get("message", "")
-        problems.append(f"signal-cli: {error_type} — {message}")
+    error_type = data.get("error", "unknown")
+    message = data.get("message", "")
+    streak = int(data.get("consecutive_failures", 0) or 0)
+
+    def _last_success_suffix() -> str:
+        success_str = data.get("last_success_at", "")
+        if not success_str:
+            return ""
+        try:
+            last_success = datetime.fromisoformat(success_str)
+            age = (datetime.now(timezone.utc) - last_success).total_seconds() / 60
+            if age < 60:
+                return f" (last healthy {int(age)}m ago)"
+            return f" (last healthy {int(age // 60)}h{int(age % 60)}m ago)"
+        except ValueError:
+            return ""
+
+    if status == "degraded":
+        problems.append(
+            f"signal-cli: DEGRADED after {streak} consecutive failures "
+            f"({error_type}) — run `python pipeline/signal_doctor.py` to diagnose"
+            + _last_success_suffix()
+        )
+        if message:
+            problems.append(f"  └─ {message}")
+    elif status == "error":
+        problems.append(
+            f"signal-cli: {error_type} — {message}" + _last_success_suffix()
+        )
+        if streak > 1:
+            problems.append(f"  └─ {streak} consecutive failures so far")
     elif status == "ok":
         ts_str = data.get("timestamp", "")
         if ts_str:

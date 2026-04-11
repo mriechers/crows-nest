@@ -101,3 +101,132 @@ def test_search_empty_results():
     r = client.post("/search", json={"query": "nothing"})
     assert r.status_code == 200
     assert r.json()["results"] == []
+
+
+# ---------------------------------------------------------------------------
+# /add-link tests
+# ---------------------------------------------------------------------------
+
+def _add_link_client(tmp_path, *, token="test-token"):
+    """Build a test client with a per-test SQLite db and a known token."""
+    mock_semantic = MagicMock()
+    mock_semantic.search.return_value = []
+    mock_semantic.get_status.return_value = {}
+    db_path = str(tmp_path / "test.db")
+    app = create_api(
+        semantic_index=mock_semantic,
+        api_token=token,
+        db_path=db_path,
+    )
+    return TestClient(app), db_path
+
+
+def test_add_link_requires_token(tmp_path):
+    client, _ = _add_link_client(tmp_path)
+    r = client.post("/add-link", json={"url": "https://example.com"})
+    assert r.status_code == 401
+
+
+def test_add_link_rejects_bad_token(tmp_path):
+    client, _ = _add_link_client(tmp_path)
+    r = client.post(
+        "/add-link",
+        json={"url": "https://example.com"},
+        headers={"X-Crows-Nest-Token": "wrong"},
+    )
+    assert r.status_code == 401
+
+
+def test_add_link_disabled_when_token_blank(tmp_path):
+    """Blank token means the endpoint is administratively disabled."""
+    client, _ = _add_link_client(tmp_path, token="")
+    r = client.post(
+        "/add-link",
+        json={"url": "https://example.com"},
+        headers={"X-Crows-Nest-Token": ""},
+    )
+    assert r.status_code == 503
+
+
+def test_add_link_requires_url(tmp_path):
+    client, _ = _add_link_client(tmp_path)
+    r = client.post(
+        "/add-link",
+        json={},
+        headers={"X-Crows-Nest-Token": "test-token"},
+    )
+    assert r.status_code == 400
+
+
+def test_add_link_rejects_non_string_url(tmp_path):
+    client, _ = _add_link_client(tmp_path)
+    r = client.post(
+        "/add-link",
+        json={"url": 42},
+        headers={"X-Crows-Nest-Token": "test-token"},
+    )
+    assert r.status_code == 400
+
+
+def test_add_link_queues_url(tmp_path):
+    client, db_path = _add_link_client(tmp_path)
+    r = client.post(
+        "/add-link",
+        json={"url": "https://example.com", "context": "from the API"},
+        headers={"X-Crows-Nest-Token": "test-token"},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "queued"
+    assert body["source_type"] == "http"
+    assert body["content_type"]  # classify_url returned something
+    assert isinstance(body["id"], int)
+
+    # Verify the row landed in the database with the expected source_type.
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT url, source_type, context, status FROM links WHERE id = ?",
+            (body["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == ("https://example.com", "http", "from the API", "pending")
+
+
+def test_add_link_honours_source_type_override(tmp_path):
+    client, _ = _add_link_client(tmp_path)
+    r = client.post(
+        "/add-link",
+        json={"url": "https://example.com/2", "source_type": "shortcut"},
+        headers={"X-Crows-Nest-Token": "test-token"},
+    )
+    assert r.status_code == 201
+    assert r.json()["source_type"] == "shortcut"
+
+
+def test_add_link_duplicate_returns_409(tmp_path):
+    client, _ = _add_link_client(tmp_path)
+    headers = {"X-Crows-Nest-Token": "test-token"}
+    first = client.post(
+        "/add-link", json={"url": "https://dup.example"}, headers=headers,
+    )
+    assert first.status_code == 201
+    second = client.post(
+        "/add-link", json={"url": "https://dup.example"}, headers=headers,
+    )
+    assert second.status_code == 409
+
+
+def test_add_link_invalid_json(tmp_path):
+    client, _ = _add_link_client(tmp_path)
+    r = client.post(
+        "/add-link",
+        content=b"not json",
+        headers={
+            "X-Crows-Nest-Token": "test-token",
+            "Content-Type": "application/json",
+        },
+    )
+    assert r.status_code == 400

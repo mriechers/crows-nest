@@ -202,18 +202,33 @@ def _batch_image_messages(messages: list[dict]) -> tuple[list[dict], list[dict]]
     return image_batches, non_image_messages
 
 
+# Last-failure details from receive_messages(), consumed by run() so it
+# can distinguish auth/registration errors from transient subprocess errors
+# when writing to the health file. Keys: ``error`` (short code) and
+# ``message`` (human-readable). Reset to {} at the start of each call.
+_LAST_RECEIVE_ERROR: dict = {}
+
+
 def receive_messages() -> list[dict] | None:
     """Invoke signal-cli in JSON mode and return parsed messages.
 
     Calls `signal-cli -u {SIGNAL_USER} receive --timeout {RECEIVE_TIMEOUT} --json`.
     The command returns all buffered messages in a single invocation.
 
+    On failure, ``_LAST_RECEIVE_ERROR`` is populated with an ``error`` code
+    and ``message`` so callers can forward structured detail to the health
+    file without re-interpreting stderr.
+
     Returns:
         List of dicts with keys "sender_id", "sender_name", "message",
         "timestamp", "group_name", "attachments".
-        Returns an empty list on any subprocess error.
-        Returns None on fatal errors (e.g. account not registered).
+        Returns None on any failure (auth error, subprocess error, timeout
+        with no output). Partial-timeout salvage is still treated as
+        success and returns the parsed partial list.
     """
+    global _LAST_RECEIVE_ERROR  # noqa: PLW0603 — module-level error state
+    _LAST_RECEIVE_ERROR = {}
+
     cmd = [
         SIGNAL_CLI,
         "-u", SIGNAL_USER,
@@ -237,8 +252,20 @@ def receive_messages() -> list[dict] | None:
                     "Re-register with: signal-cli -u %s register && signal-cli -u %s verify CODE",
                     SIGNAL_USER, SIGNAL_USER,
                 )
+                _LAST_RECEIVE_ERROR = {
+                    "error": "not_registered",
+                    "message": (
+                        f"signal-cli account {SIGNAL_USER} is not registered. "
+                        f"Run: signal-cli -u {SIGNAL_USER} register && "
+                        f"signal-cli -u {SIGNAL_USER} verify CODE"
+                    ),
+                }
                 return None
             logger.error("signal-cli exited %d: %s", result.returncode, stderr)
+            _LAST_RECEIVE_ERROR = {
+                "error": "signal_cli_error",
+                "message": f"signal-cli exited {result.returncode}: {stderr[:200]}",
+            }
             return None
         return _parse_json_output(result.stdout)
     except subprocess.TimeoutExpired as exc:
@@ -251,10 +278,18 @@ def receive_messages() -> list[dict] | None:
             logger.warning("signal-cli timed out but captured partial output (%d bytes) — parsing", len(partial))
             return _parse_json_output(partial)
         logger.error("signal-cli timed out with no output")
-        return []
+        _LAST_RECEIVE_ERROR = {
+            "error": "timeout",
+            "message": f"signal-cli receive timed out after {RECEIVE_TIMEOUT + 5}s with no output",
+        }
+        return None
     except Exception as exc:
         logger.error("Failed to receive Signal messages: %s", exc)
-        return []
+        _LAST_RECEIVE_ERROR = {
+            "error": "subprocess_error",
+            "message": f"signal-cli invocation failed: {exc}",
+        }
+        return None
 
 
 def send_confirmation(recipient: str, message: str) -> None:
@@ -290,20 +325,96 @@ def _log_message(sender: str, body: str, group: str = "") -> None:
         logger.warning("Could not write to message log: %s", exc)
 
 
-def _write_health(status: str, error: str = "", message: str = "") -> None:
-    """Write a machine-readable health status file for the signal listener."""
+def _read_health() -> dict:
+    """Read the current health file, returning {} if missing or unreadable."""
+    if not os.path.exists(SIGNAL_HEALTH_FILE):
+        return {}
+    try:
+        with open(SIGNAL_HEALTH_FILE, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_health(
+    status: str,
+    error: str = "",
+    message: str = "",
+    last_success_at: str | None = None,
+    consecutive_failures: int | None = None,
+) -> None:
+    """Write a machine-readable health status file for the signal listener.
+
+    Preserves prior ``last_success_at`` across error writes so status.py can
+    show how long it has been since the listener successfully reached
+    signal-cli, regardless of how many poll cycles have failed since then.
+
+    Args:
+        status: ``ok``, ``error``, or ``degraded``.
+        error: Short machine-readable error code.
+        message: Human-readable description.
+        last_success_at: ISO timestamp to record. If None, preserves any
+            existing value from the previous health file.
+        consecutive_failures: Failure streak count. Passed through as-is;
+            callers manage the increment/reset logic.
+    """
     ts = datetime.now(timezone.utc).isoformat()
-    payload = {"status": status, "timestamp": ts}
+    prior = _read_health()
+    payload: dict = {"status": status, "timestamp": ts}
     if error:
         payload["error"] = error
     if message:
         payload["message"] = message
+
+    # Preserve last_success_at across error writes unless overridden.
+    if last_success_at is not None:
+        payload["last_success_at"] = last_success_at
+    elif prior.get("last_success_at"):
+        payload["last_success_at"] = prior["last_success_at"]
+
+    if consecutive_failures is not None:
+        payload["consecutive_failures"] = consecutive_failures
+
     try:
         os.makedirs(os.path.dirname(SIGNAL_HEALTH_FILE), exist_ok=True)
         with open(SIGNAL_HEALTH_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f)
     except OSError as exc:
         logger.warning("Could not write health file: %s", exc)
+
+
+# Threshold after which the listener reports "degraded" instead of "error".
+# Once degraded, status.py escalates the warning even if the next poll
+# happens to be an explicit failure vs a silent empty-return.
+DEGRADED_FAILURE_THRESHOLD = 3
+
+
+def _record_success() -> None:
+    """Mark the listener as healthy and reset the failure streak."""
+    now = datetime.now(timezone.utc).isoformat()
+    _write_health(
+        status="ok",
+        last_success_at=now,
+        consecutive_failures=0,
+    )
+
+
+def _record_failure(error: str, message: str) -> None:
+    """Record a failed receive, incrementing the consecutive-failure counter.
+
+    After ``DEGRADED_FAILURE_THRESHOLD`` consecutive failures the listener
+    status transitions from ``error`` to ``degraded`` so monitoring can
+    surface it as a persistent problem rather than a transient blip.
+    """
+    prior = _read_health()
+    streak = int(prior.get("consecutive_failures", 0) or 0) + 1
+    status = "degraded" if streak >= DEGRADED_FAILURE_THRESHOLD else "error"
+    _write_health(
+        status=status,
+        error=error,
+        message=message,
+        consecutive_failures=streak,
+    )
 
 
 def run(db_path: str) -> None:
@@ -321,17 +432,22 @@ def run(db_path: str) -> None:
     """
     if not SIGNAL_USER:
         logger.error("SIGNAL_USER not set (check Keychain or env var) — cannot receive messages")
-        _write_health("error", "no_signal_user", "SIGNAL_USER not configured")
+        _record_failure("no_signal_user", "SIGNAL_USER not configured")
         return
 
     init_db(db_path)
     messages = receive_messages()
 
     if messages is None:
-        _write_health("error", "not_registered", f"signal-cli account {SIGNAL_USER} is not registered")
+        err = _LAST_RECEIVE_ERROR or {}
+        _record_failure(
+            err.get("error", "receive_failed"),
+            err.get("message", "signal-cli receive failed with no detail"),
+        )
         return
 
-    _write_health("ok")
+    # Successful round-trip to signal-cli (even if no messages arrived).
+    _record_success()
 
     image_batches, non_image_messages = _batch_image_messages(messages)
 

@@ -19,6 +19,7 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 - `pipeline/db.py` — SQLite status machine (pending → downloading → transcribed → summarized → archived)
 - `pipeline/status.py` — dashboard (`python status.py`) and health check (`python status.py --health`)
 - `pipeline/add_link.py` — CLI to manually queue URLs
+- `pipeline/signal_doctor.py` — diagnostic CLI for signal-cli auth/setup issues (`python signal_doctor.py`)
 - `pipeline/keychain_secrets.py` — macOS Keychain with env var fallback for API keys
 - `pipeline/fix_obsidian_names.py` — fixes Obsidian filenames with banned characters and updates weekly log wikilinks to match (dry run by default, pass `--apply` to write changes)
 
@@ -38,6 +39,35 @@ cd ~/Developer/second-brain/crows-nest
 
 - **macOS**: launchd plists in `config/launchd/` (installed to `~/Library/LaunchAgents/`)
 - **Linux**: systemd timer/service units in `config/systemd/` (install to `/etc/systemd/system/`)
+
+### Signal listener health & recovery
+
+The listener writes a structured health file at `logs/signal-health.json`
+after every poll. `pipeline/status.py --health` surfaces three states:
+
+- **ok** — last poll reached signal-cli successfully
+- **error** — single transient failure (timeout, subprocess error, ...)
+- **degraded** — 3+ consecutive failures; needs user intervention
+
+The health file also tracks `last_success_at` and `consecutive_failures`
+so `status.py --health` can report "last healthy Nh Mm ago" even while
+the listener is in a failure state.
+
+When Signal ingestion stops working:
+
+1. **Diagnose**: `python pipeline/signal_doctor.py`
+   Runs four checks — SIGNAL_USER configured, signal-cli binary on PATH,
+   signal-cli data directory exists, and a live `receive --timeout 1` —
+   and prints exact recovery commands for each failing check.
+2. **Re-link** (most common fix): when signal-cli reports "not registered",
+   your linked device has expired. Re-link with:
+   ```bash
+   signal-cli -a "+16085551234" link -n "crows-nest"
+   ```
+   then scan the QR code from the Signal mobile app under
+   *Settings → Linked Devices → Link New Device*.
+3. **Fallback capture** while Signal is broken: use the HTTP
+   `/add-link` endpoint (see below) or `python pipeline/add_link.py URL`.
 
 ### Platform portability
 
@@ -110,8 +140,59 @@ Optional localhost HTTP API. Enable via `CROWS_NEST_HTTP_API=true` env var.
 | `/status` | GET | Index health dashboard |
 | `/reindex` | POST | Trigger media archive reindex |
 | `/health` | GET | Liveness check |
+| `/add-link` | POST | Queue a URL for the pipeline (token-authed) |
 
 Default port: 27185. Override: `CROWS_NEST_HTTP_PORT`.
+
+#### /add-link — Signal-independent URL ingestion
+
+`POST /add-link` queues a URL into the same pending pipeline as the Signal
+listener. It is the foundation for iOS/macOS Shortcuts, bookmarklets,
+browser extensions, and any other tool that can make an HTTP call — useful
+whenever the Signal listener is down for auth reasons.
+
+**Enable it** by setting a shared-secret token (required):
+
+```bash
+export CROWS_NEST_HTTP_API=true
+export CROWS_NEST_API_TOKEN="some-long-random-string"
+```
+
+Without `CROWS_NEST_API_TOKEN` the endpoint returns 503. With it, the
+endpoint requires that exact token in the `X-Crows-Nest-Token` header.
+
+**Request body** (JSON):
+
+```json
+{
+  "url": "https://example.com/article",
+  "context": "optional note about why this was saved",
+  "source_type": "http"
+}
+```
+
+`source_type` is optional and defaults to `"http"` — override it to tag
+where the request came from (e.g. `"shortcut"`, `"bookmarklet"`).
+
+**Responses:**
+- `201 {id, status:"queued", content_type, source_type}` — queued successfully
+- `400` — missing or non-string `url`, or invalid JSON body
+- `401` — missing or wrong token
+- `409` — URL already queued (same deduplication as Signal listener)
+- `503` — endpoint disabled (token not set)
+
+**Example** — queue a URL from the command line:
+
+```bash
+curl -X POST http://127.0.0.1:27185/add-link \
+  -H "X-Crows-Nest-Token: $CROWS_NEST_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com","context":"manual curl"}'
+```
+
+For remote access (pipeline on Proxmox), front it with Tailscale and
+point the client at the Tailscale IP; the endpoint binds to
+`CROWS_NEST_HTTP_HOST` (default `127.0.0.1`).
 
 ## Development
 
