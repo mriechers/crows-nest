@@ -93,8 +93,9 @@ async function handleIngest(request, env) {
       url: linkUrl,
     });
   } catch (err) {
+    console.error("queue insert failed:", err.message);
     return Response.json(
-      { error: "queue insert failed", detail: err.message },
+      { error: "queue insert failed" },
       { status: 500 }
     );
   }
@@ -161,9 +162,12 @@ async function handleJobCreate(request, env) {
     return Response.json({ error: "type is required" }, { status: 400 });
   }
 
+  if (body.id && !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) {
+    return Response.json({ error: "invalid id format" }, { status: 400 });
+  }
   const id = body.id || `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const payload = JSON.stringify(body.payload || {});
-  const priority = body.priority || 0;
+  const priority = Number.isInteger(body.priority) ? body.priority : 0;
   const now = new Date().toISOString();
 
   try {
@@ -175,8 +179,9 @@ async function handleJobCreate(request, env) {
 
     return Response.json({ id, status: "pending", type });
   } catch (err) {
+    console.error("job insert failed:", err.message);
     return Response.json(
-      { error: "job insert failed", detail: err.message },
+      { error: "job insert failed" },
       { status: 500 }
     );
   }
@@ -202,10 +207,14 @@ async function handleJobsPending(request, env) {
   sql += " ORDER BY priority DESC, created_at ASC LIMIT ?";
   binds.push(limit);
 
-  const stmt = env.DB.prepare(sql);
-  const { results } = await stmt.bind(...binds).all();
-
-  return Response.json({ jobs: results });
+  try {
+    const stmt = env.DB.prepare(sql);
+    const { results } = await stmt.bind(...binds).all();
+    return Response.json({ jobs: results });
+  } catch (err) {
+    console.error("jobs pending query failed:", err.message);
+    return Response.json({ error: "query failed" }, { status: 500 });
+  }
 }
 
 async function handleJobClaim(request, env) {
@@ -228,17 +237,22 @@ async function handleJobClaim(request, env) {
 
   const now = new Date().toISOString();
 
-  const result = await env.DB.prepare(
-    "UPDATE jobs SET status = 'claimed', claimed_by = ?, claimed_at = ? WHERE id = ? AND status = 'pending'"
-  )
-    .bind(nodeId, now, jobId)
-    .run();
+  try {
+    const result = await env.DB.prepare(
+      "UPDATE jobs SET status = 'claimed', claimed_by = ?, claimed_at = ? WHERE id = ? AND status = 'pending'"
+    )
+      .bind(nodeId, now, jobId)
+      .run();
 
-  if (result.meta.changes === 0) {
-    return Response.json({ error: "job not available" }, { status: 409 });
+    if (result.meta.changes === 0) {
+      return Response.json({ error: "job not available" }, { status: 409 });
+    }
+
+    return Response.json({ job_id: jobId, claimed_by: nodeId, status: "claimed" });
+  } catch (err) {
+    console.error("job claim failed:", err.message);
+    return Response.json({ error: "claim failed" }, { status: 500 });
   }
-
-  return Response.json({ job_id: jobId, claimed_by: nodeId, status: "claimed" });
 }
 
 async function handleJobComplete(request, env) {
@@ -262,13 +276,22 @@ async function handleJobComplete(request, env) {
     return Response.json({ error: "job_id is required" }, { status: 400 });
   }
 
-  await env.DB.prepare(
-    "UPDATE jobs SET status = ?, completed_at = ?, error = ? WHERE id = ? AND status = 'claimed'"
-  )
-    .bind(status, now, error, jobId)
-    .run();
+  try {
+    const result = await env.DB.prepare(
+      "UPDATE jobs SET status = ?, completed_at = ?, error = ? WHERE id = ? AND status = 'claimed'"
+    )
+      .bind(status, now, error, jobId)
+      .run();
 
-  return Response.json({ job_id: jobId, status });
+    if (result.meta.changes === 0) {
+      return Response.json({ error: "job not found or not in claimed state" }, { status: 409 });
+    }
+
+    return Response.json({ job_id: jobId, status });
+  } catch (err) {
+    console.error("job complete failed:", err.message);
+    return Response.json({ error: "complete failed" }, { status: 500 });
+  }
 }
 
 async function handleHeartbeat(request, env) {
@@ -293,17 +316,22 @@ async function handleHeartbeat(request, env) {
   const currentJob = body.current_job || null;
   const now = new Date().toISOString();
 
-  await env.DB.prepare(
-    `INSERT INTO nodes (node_id, hostname, capabilities, last_heartbeat, current_job)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(node_id) DO UPDATE SET
-       hostname = excluded.hostname,
-       capabilities = excluded.capabilities,
-       last_heartbeat = excluded.last_heartbeat,
-       current_job = excluded.current_job`
-  )
-    .bind(nodeId, hostname, capabilities, now, currentJob)
-    .run();
+  try {
+    await env.DB.prepare(
+      `INSERT INTO nodes (node_id, hostname, capabilities, last_heartbeat, current_job)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(node_id) DO UPDATE SET
+         hostname = excluded.hostname,
+         capabilities = excluded.capabilities,
+         last_heartbeat = excluded.last_heartbeat,
+         current_job = excluded.current_job`
+    )
+      .bind(nodeId, hostname, capabilities, now, currentJob)
+      .run();
 
-  return Response.json({ node_id: nodeId, last_heartbeat: now });
+    return Response.json({ node_id: nodeId, last_heartbeat: now });
+  } catch (err) {
+    console.error("heartbeat failed:", err.message);
+    return Response.json({ error: "heartbeat failed" }, { status: 500 });
+  }
 }
