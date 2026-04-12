@@ -44,6 +44,7 @@ MEDIA_ROOT = os.environ.get(
 
 DATA_DIR = os.path.join(CROWS_NEST_HOME, "data")
 LOG_DIR = os.path.join(CROWS_NEST_HOME, "logs")
+LAUNCHD_LOG_DIR = os.path.expanduser("~/.local/share/crows-nest/logs")
 SCRIPTS_DIR = os.path.join(CROWS_NEST_HOME, "scripts")
 PIPELINE_DIR = os.path.join(CROWS_NEST_HOME, "pipeline")
 

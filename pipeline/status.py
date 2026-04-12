@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 # Allow running directly from any working directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import LOG_DIR
+from config import LAUNCHD_LOG_DIR, LOG_DIR
 from db import DB_PATH, get_connection, init_db
 
 
@@ -125,23 +125,23 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # and the max age (in minutes) before the log is considered stale.
 PIPELINE_JOBS = {
     "processor.py": {
-        "log": os.path.join(LOG_DIR, "launchd-crows-nest-processor.log"),
+        "log": os.path.join(LAUNCHD_LOG_DIR, "processor.log"),
         "max_stale_minutes": 60,     # runs every 30 min
     },
     "summarizer.py": {
-        "log": os.path.join(LOG_DIR, "launchd-crows-nest-summarizer.log"),
+        "log": os.path.join(LAUNCHD_LOG_DIR, "summarizer.log"),
         "max_stale_minutes": 180,    # runs every 2 hr
     },
     "archiver.py": {
-        "log": os.path.join(LOG_DIR, "launchd-crows-nest-archiver.log"),
+        "log": os.path.join(LAUNCHD_LOG_DIR, "archiver.log"),
         "max_stale_minutes": 1500,   # runs daily at 3 AM
     },
     "ingest_poller.py": {
-        "log": os.path.join(LOG_DIR, "launchd-ingest-poller.log"),
+        "log": os.path.join(LAUNCHD_LOG_DIR, "ingest-poller.log"),
         "max_stale_minutes": 15,     # runs every 5 min
     },
     "obsidian_scanner.py": {
-        "log": os.path.join(LOG_DIR, "launchd-obsidian-scanner.log"),
+        "log": os.path.join(LAUNCHD_LOG_DIR, "obsidian-scanner.log"),
         "max_stale_minutes": 15,     # runs every 5 min
     },
 }
