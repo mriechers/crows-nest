@@ -5,9 +5,10 @@ All paths are derived from environment variables with sensible defaults
 for the macOS development environment. On Proxmox/Linux, set these env
 vars to override:
 
-    CROWS_NEST_HOME     — repo root (default: ~/Developer/second-brain/crows-nest)
-    OBSIDIAN_VAULT      — vault root (default: ~/Developer/obsidian/MarkBrain)
-    MEDIA_ROOT          — media storage (default: {CROWS_NEST_HOME}/media)
+    CROWS_NEST_HOME          — repo root (default: ~/Developer/second-brain/crows-nest)
+    OBSIDIAN_VAULT           — vault root (default: ~/Developer/obsidian/MarkBrain)
+    MEDIA_ROOT               — media storage (default: {CROWS_NEST_HOME}/media)
+    OBSIDIAN_CLIPPINGS_SUBDIR — subfolder under vault for clippings (default: 3 - RESOURCES/INTERNET CLIPPINGS)
 
 Example systemd override:
     Environment=CROWS_NEST_HOME=/opt/crows-nest
@@ -52,7 +53,10 @@ MESSAGE_LOG = os.path.join(LOG_DIR, "signal-messages.log")
 SIGNAL_HEALTH_FILE = os.path.join(LOG_DIR, "signal-health.json")
 WHISPER_SCRIPT = os.path.join(SCRIPTS_DIR, "whisper-transcribe.sh")
 
-OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "INTERNET CLIPPINGS")
+OBSIDIAN_CLIPPINGS = os.path.join(
+    OBSIDIAN_VAULT,
+    os.environ.get("OBSIDIAN_CLIPPINGS_SUBDIR", os.path.join("3 - RESOURCES", "INTERNET CLIPPINGS")),
+)
 OBSIDIAN_ARCHIVE = os.path.join(OBSIDIAN_VAULT, "4 - ARCHIVE")
 
 

@@ -20,7 +20,7 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 
 1. **Listener** — Multiple input scripts save URLs to SQLite with `status='pending'`
 2. **Processor** (`pipeline/processor.py`) — Routes by content type: yt-dlp download, ffmpeg audio extraction, Whisper transcription, image conversion/resize, thumbnail extraction. Args: `--limit N` (default 20), `--drain` (loop until empty), `--db PATH`
-3. **Summarizer** (`pipeline/summarizer.py`) — Calls Claude Haiku via OpenRouter, writes Obsidian notes to `2 - AREAS/INTERNET CLIPPINGS/` with YAML frontmatter. Args: `--limit N` (default 5), `--drain`, `--db PATH`
+3. **Summarizer** (`pipeline/summarizer.py`) — Calls Claude Haiku via OpenRouter, writes Obsidian notes to `3 - RESOURCES/INTERNET CLIPPINGS/` (configurable via `OBSIDIAN_CLIPPINGS_SUBDIR`) with YAML frontmatter. Args: `--limit N` (default 5), `--drain`, `--db PATH`
 4. **Archiver** (`pipeline/archiver.py`) — Uploads media to R2 (`crows-nest-media-archive` bucket), generates share URLs via `share.bymarkriechers.com`, updates DB and Obsidian note. Web pages go to Readwise Reader instead. Args: `--db PATH`
 
 ### Key Files

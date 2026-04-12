@@ -29,8 +29,11 @@ from utils import setup_logging
 
 logger = setup_logging("crows-nest.sync-clippings")
 
-# The old output directory before the rename
-LEGACY_CLIPPINGS_DIR = os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "CLIPPINGS - Need Sorting")
+# Previous output directories (scanned for stragglers during sync)
+LEGACY_CLIPPINGS_DIRS = [
+    os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "CLIPPINGS - Need Sorting"),
+    os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "INTERNET CLIPPINGS"),
+]
 
 # Content type to tag mapping (mirrors summarizer.py)
 CONTENT_TYPE_TAG_MAP = {
@@ -194,19 +197,20 @@ def find_clipping_notes(scan_dirs: list[str]) -> list[str]:
     for scan_dir in scan_dirs:
         if not os.path.isdir(scan_dir):
             continue
-        for name in os.listdir(scan_dir):
-            if not name.endswith(".md"):
-                continue
-            path = os.path.join(scan_dir, name)
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    head = f.read(2000)
-                fm, _ = parse_frontmatter(head)
-                tags = fm.get("tags", [])
-                if isinstance(tags, list) and "clippings" in tags:
-                    notes.append(path)
-            except (OSError, ValueError):
-                continue
+        for root, _dirs, files in os.walk(scan_dir):
+            for name in files:
+                if not name.endswith(".md"):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        head = f.read(2000)
+                    fm, _ = parse_frontmatter(head)
+                    tags = fm.get("tags", [])
+                    if isinstance(tags, list) and "clippings" in tags:
+                        notes.append(path)
+                except (OSError, ValueError):
+                    continue
     return sorted(notes)
 
 
@@ -263,8 +267,16 @@ def sync_note(
         if rule_add_share_url(fm, body, db_share_url):
             report["fixes"].append("add_share_url")
 
-        # Determine target path
+        # Determine target path — use date subfolders when a date is available
         target_dir = OBSIDIAN_CLIPPINGS
+        created_at = fm.get("created") or fm.get("date") or ""
+        if created_at:
+            try:
+                date_str = str(created_at)[:10]
+                year, month, day = date_str.split("-")
+                target_dir = os.path.join(OBSIDIAN_CLIPPINGS, year, month, day)
+            except (ValueError, IndexError):
+                pass
         target_path = os.path.join(target_dir, os.path.basename(note_path))
         needs_move = os.path.abspath(note_path) != os.path.abspath(target_path)
 
@@ -371,7 +383,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Default scan dirs: both old and new locations
-    scan_dirs = args.scan_dirs or [LEGACY_CLIPPINGS_DIR, OBSIDIAN_CLIPPINGS]
+    scan_dirs = args.scan_dirs or LEGACY_CLIPPINGS_DIRS + [OBSIDIAN_CLIPPINGS]
     # Deduplicate and filter to existing dirs
     scan_dirs = list(dict.fromkeys(d for d in scan_dirs if os.path.isdir(d)))
 

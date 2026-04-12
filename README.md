@@ -50,7 +50,7 @@ python pipeline/processor.py [--limit N] [--drain] [--db PATH]
 
 **Stage 3 — Summarizer** (`summarizer.py`)
 
-Picks up `transcribed` items, calls Claude Haiku via OpenRouter for structured analysis, and writes Obsidian notes to `2 - AREAS/INTERNET CLIPPINGS/` with vault-convention YAML frontmatter and content-type tags.
+Picks up `transcribed` items, calls Claude Haiku via OpenRouter for structured analysis, and writes Obsidian notes to `3 - RESOURCES/INTERNET CLIPPINGS/` (configurable via `OBSIDIAN_CLIPPINGS_SUBDIR` env var) with vault-convention YAML frontmatter and content-type tags.
 
 ```bash
 python pipeline/summarizer.py [--limit N] [--drain] [--db PATH]
