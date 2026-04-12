@@ -45,8 +45,8 @@ except ImportError as _rss_exc:
 
 mcp = FastMCP(
     config.SERVER_NAME,
-    host=config.MCP_SSE_HOST,
-    port=config.MCP_SSE_PORT,
+    host=config.MCP_HOST,
+    port=config.MCP_PORT,
 )
 
 # ---------------------------------------------------------------------------
