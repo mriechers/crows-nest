@@ -35,7 +35,7 @@ def test_update_status_sets_video_path(tmp_path):
 
     link_id = db.add_link(
         url="https://example.com/video",
-        source_type="signal",
+        source_type="cli",
         sender="+15551234567",
         context="test video",
         content_type="video",
@@ -68,7 +68,7 @@ def _make_link(tmp_path, url="https://youtube.com/watch?v=abc", content_type="yo
     db_path = str(tmp_path / "test.db")
     db.init_db(db_path)
     link_id = db.add_link(
-        url=url, source_type="signal", sender="test",
+        url=url, source_type="cli", sender="test",
         context="", content_type=content_type, db_path=db_path,
     )
     return link_id, db_path

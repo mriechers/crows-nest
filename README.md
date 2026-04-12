@@ -1,8 +1,8 @@
 # Crow's Nest
 
-Two systems in one repo: a **Signal-to-Obsidian content preservation pipeline** and an **MCP knowledge server**.
+Two systems in one repo: a **URL-to-Obsidian content preservation pipeline** and an **MCP knowledge server**.
 
-The pipeline captures URLs shared via Signal, iMessage, or a Cloudflare ingest queue, processes them (media download, Whisper transcription, Claude summarization), and writes structured Obsidian notes. The MCP server exposes a keyword-searchable knowledge base and RSS feed tools to any MCP-compatible AI client.
+The pipeline captures URLs from a Cloudflare ingest queue, Obsidian vault tags, or CLI input, processes them (media download, Whisper transcription, Claude summarization), and writes structured Obsidian notes. The MCP server exposes a keyword-searchable knowledge base and RSS feed tools to any MCP-compatible AI client.
 
 ---
 
@@ -22,17 +22,15 @@ Each stage is an independent script that claims work atomically and updates the 
 
 | Source | Script | How It Works |
 |--------|--------|-------------|
-| Signal messages | `pipeline/signal_listener.py` | Polls signal-cli every 5 min, extracts URLs |
-| iMessage self-messages | `pipeline/imessage_listener.py` | Polls local iMessage DB for messages you sent to yourself |
 | Cloudflare ingest queue | `pipeline/ingest_poller.py` | Drains a D1 queue populated by a Cloudflare Worker |
 | Obsidian notes | `pipeline/obsidian_scanner.py` | Scans vault for notes tagged `pending-clippings` |
 | CLI | `pipeline/add_link.py` | Manually queue a URL from the command line |
 
 ### Pipeline Stages
 
-**Stage 1 — Listener** (`signal_listener.py`, `imessage_listener.py`, `ingest_poller.py`)
+**Stage 1 — Intake** (`ingest_poller.py`, `obsidian_scanner.py`, `add_link.py`)
 
-URLs are extracted and saved to SQLite with status `pending`. Signal sends a confirmation reply. The ingest poller additionally marks items synced in the remote D1 queue.
+URLs are extracted and saved to SQLite with status `pending`. The ingest poller additionally marks items synced in the remote D1 queue.
 
 **Stage 2 — Processor** (`processor.py`)
 
@@ -85,7 +83,7 @@ python pipeline/status.py --health  # health check (exit 0/1)
 
 SQLite at `{CROWS_NEST_HOME}/data/crows-nest.db`. Two schemas:
 
-- **Pipeline schema**: `links` (status machine), `processing_log`, `signal_messages`
+- **Pipeline schema**: `links` (status machine), `processing_log`
 - **RSS schema**: `feeds`, `articles` (ephemeral cache with TTL expiry)
 
 ---
@@ -166,9 +164,6 @@ All paths are configurable. Defaults work for a standard macOS dev setup.
 Stored in macOS Keychain (env var fallback for Linux):
 
 ```bash
-# Signal
-security add-generic-password -a "$USER" -s "developer.workspace.SIGNAL_USER" -w "+1..." -U
-
 # OpenRouter (for Claude Haiku summarization)
 security add-generic-password -a "$USER" -s "developer.workspace.OPENROUTER_API_KEY" -w "sk-..." -U
 
@@ -214,8 +209,6 @@ Plists in `config/launchd/`, installed to `~/Library/LaunchAgents/`:
 
 | Plist | Runs |
 |-------|------|
-| `com.crows-nest.listener.plist` | Signal listener (every 5 min) |
-| `com.crows-nest.imessage-listener.plist` | iMessage listener |
 | `com.crows-nest.ingest-poller.plist` | Cloudflare queue poller |
 | `com.crows-nest.processor.plist` | Content processor |
 | `com.crows-nest.summarizer.plist` | Summarizer |
@@ -225,16 +218,16 @@ Plists in `config/launchd/`, installed to `~/Library/LaunchAgents/`:
 
 ```bash
 cp config/launchd/*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.crows-nest.listener.plist
+launchctl load ~/Library/LaunchAgents/com.crows-nest.ingest-poller.plist
 ```
 
 ### Linux (systemd)
 
-Service/timer pairs in `config/systemd/` for listener, processor, summarizer, and archiver.
+Service/timer pairs in `config/systemd/` for processor, summarizer, and archiver.
 
 ```bash
 sudo cp config/systemd/* /etc/systemd/system/
-sudo systemctl enable --now crows-nest-listener.timer
+sudo systemctl enable --now crows-nest-processor.timer
 ```
 
 ---
@@ -247,10 +240,8 @@ crows-nest/
 │   ├── config.py            # All paths (env-var configurable)
 │   ├── db.py                # SQLite schema + CRUD
 │   ├── content_types.py     # URL classification
-│   ├── signal_listener.py   # Stage 1a: Signal input
-│   ├── imessage_listener.py # Stage 1b: iMessage input
-│   ├── ingest_poller.py     # Stage 1c: Cloudflare D1 queue input
-│   ├── obsidian_scanner.py  # Stage 1d: Obsidian vault input
+│   ├── ingest_poller.py     # Stage 1a: Cloudflare D1 queue input
+│   ├── obsidian_scanner.py  # Stage 1b: Obsidian vault input
 │   ├── processor.py         # Stage 2: download + transcribe
 │   ├── summarizer.py        # Stage 3: LLM summarization + Obsidian notes
 │   ├── archiver.py          # Stage 4: R2 upload + share URLs

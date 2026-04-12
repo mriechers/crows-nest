@@ -28,7 +28,6 @@ def test_build_frontmatter():
     assert "- python" in result
     assert "source: https://example.com/article" in result
     # No sender fields when sender is None
-    assert "via: signal" not in result
     assert "sender:" not in result
 
 
@@ -54,14 +53,13 @@ def test_generate_note_content_web():
 def test_build_frontmatter_with_sender():
     """Verify sender-related fields appear when sender is provided."""
     result = build_frontmatter(
-        title="Signal Share",
+        title="Shared Link",
         source="https://example.com/shared",
         content_type="youtube",
         tags=["video"],
         sender="Alice",
     )
 
-    assert "via: signal" in result
     assert 'sender: "Alice"' in result
     assert "- video-clip" in result
 
@@ -70,28 +68,27 @@ def test_build_frontmatter_image():
     """Image frontmatter should include image-clip tag and image-count."""
     result = build_frontmatter(
         title="Screenshot Analysis",
-        source="signal-image://1000-abc",
+        source="https://example.com/image",
         content_type="image",
         tags=["ai-tools"],
         sender="Bob",
-        metadata={"image_count": 2, "platform": "Signal"},
+        metadata={"image_count": 2},
     )
     assert "- image-clip" in result
     assert "image-count: 2" in result
-    assert "platform: Signal" in result
 
 
 def test_generate_note_content_image():
     """Image notes should have ![[]] embeds and extracted text section."""
     result = generate_note_content(
         title="Screenshot Test",
-        source_url="signal-image://1000-abc",
+        source_url="https://example.com/image",
         content_type="image",
         summary="A screenshot of some code.",
         key_points=["Shows Python code"],
         transcript_text="",
         metadata={"vault_filenames": ["20260319-120000-1.jpg", "20260319-120000-2.jpg"],
-                  "image_count": 2, "platform": "Signal"},
+                  "image_count": 2},
         sender="Bob",
         saved_at="2026-03-19",
         extracted_text="def hello():\n    print('world')",
@@ -107,13 +104,13 @@ def test_generate_note_content_image_no_extracted_text():
     """Image notes without extracted text should omit the section."""
     result = generate_note_content(
         title="Photo Test",
-        source_url="signal-image://2000-def",
+        source_url="https://example.com/sunset",
         content_type="image",
         summary="A photo of a sunset.",
         key_points=["Beautiful colors"],
         transcript_text="",
         metadata={"vault_filenames": ["20260319-130000-1.jpg"],
-                  "image_count": 1, "platform": "Signal"},
+                  "image_count": 1},
         extracted_text="",
     )
     assert "![[20260319-130000-1.jpg]]" in result
@@ -164,7 +161,7 @@ def test_generate_note_content_thumbnail_not_shown_for_image():
     """Image content type must NOT embed the thumbnail (uses vault_filenames instead)."""
     result = generate_note_content(
         title="Some Image",
-        source_url="signal-image://9000-xyz",
+        source_url="https://example.com/image-test",
         content_type="image",
         summary="An image.",
         key_points=[],
@@ -277,13 +274,13 @@ def test_copy_thumbnail_to_archive_collision_handling(tmp_path, monkeypatch):
 def test_build_frontmatter_includes_intake():
     """Verify intake field appears in frontmatter when provided."""
     result = build_frontmatter(
-        title="iMessage Link",
+        title="Ingest Link",
         source="https://example.com/test",
         content_type="web_page",
         tags=["test"],
-        intake="imessage",
+        intake="ingest-api",
     )
-    assert "intake: imessage" in result
+    assert "intake: ingest-api" in result
 
 
 def test_build_frontmatter_intake_defaults_to_unknown():

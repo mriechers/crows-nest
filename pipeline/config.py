@@ -48,8 +48,6 @@ SCRIPTS_DIR = os.path.join(CROWS_NEST_HOME, "scripts")
 PIPELINE_DIR = os.path.join(CROWS_NEST_HOME, "pipeline")
 
 DB_PATH = os.path.join(DATA_DIR, "crows-nest.db")
-MESSAGE_LOG = os.path.join(LOG_DIR, "signal-messages.log")
-SIGNAL_HEALTH_FILE = os.path.join(LOG_DIR, "signal-health.json")
 WHISPER_SCRIPT = os.path.join(SCRIPTS_DIR, "whisper-transcribe.sh")
 
 OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "INTERNET CLIPPINGS")

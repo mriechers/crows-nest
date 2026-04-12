@@ -13,17 +13,16 @@ def test_sources_breakdown(tmp_path, capsys):
     db_path = str(tmp_path / "test.db")
     init_db(db_path)
 
-    for url_id, source in [("a", "signal"), ("b", "signal"), ("c", "ingest-api"), ("d", "obsidian"), ("e", "imessage")]:
+    for url_id, source in [("a", "ingest-api"), ("b", "ingest-api"), ("c", "cli"), ("d", "obsidian"), ("e", "obsidian")]:
         add_link(url=f"https://example.com/{url_id}", source_type=source, db_path=db_path)
 
     print_sources(db_path)
     output = capsys.readouterr().out
 
-    assert "signal" in output
     assert "ingest-api" in output
+    assert "cli" in output
     assert "obsidian" in output
-    assert "imessage" in output
-    assert "2" in output  # signal has 2
+    assert "2" in output  # ingest-api and obsidian each have 2
 
 
 def test_sources_empty_db(tmp_path, capsys):

@@ -10,12 +10,12 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/PATH/TO/crows-nest/.venv/bin/python</string>
-        <string>/PATH/TO/crows-nest/pipeline/archiver.py</string>
+        <string>/Users/mriechers/Developer/second-brain/crows-nest/.venv/bin/python</string>
+        <string>/Users/mriechers/Developer/second-brain/crows-nest/pipeline/archiver.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/PATH/TO/crows-nest/pipeline</string>
+    <string>/Users/mriechers/Developer/second-brain/crows-nest/pipeline</string>
 
     <key>StartCalendarInterval</key>
     <dict>
@@ -26,15 +26,17 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/PATH/TO/crows-nest/logs/launchd-crows-nest-archiver.log</string>
+    <string>/Users/mriechers/.local/share/crows-nest/logs/archiver.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/PATH/TO/crows-nest/logs/launchd-crows-nest-archiver.log</string>
+    <string>/Users/mriechers/.local/share/crows-nest/logs/archiver.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>USER</key>
+        <string>mriechers</string>
     </dict>
 
     <key>RunAtLoad</key>
@@ -42,5 +44,14 @@
 
     <key>ProcessType</key>
     <string>Background</string>
+
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>LowPriorityBackgroundIO</key>
+    <true/>
 </dict>
 </plist>

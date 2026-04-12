@@ -24,7 +24,6 @@ MAX_RETRIES = 3
 
 logger = setup_logging("crows-nest.processor")
 
-SIGNAL_ATTACHMENTS = os.path.expanduser("~/.local/share/signal-cli/attachments")
 SUPPORTED_IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"}
 
 
@@ -110,7 +109,7 @@ def process_image(
     metadata["vault_filenames"] = vault_filenames
     metadata["context"] = context
     metadata["content_type"] = "image"
-    metadata["platform"] = "Signal"
+    metadata["content_type_detail"] = "image"
     metadata["processed_at"] = datetime.now(timezone.utc).isoformat()
 
     metadata_path = os.path.join(media_dir, "metadata.json")

@@ -35,7 +35,7 @@ def _insert_archived_link(db_path: str, download_path: str, days_ago: int = 40) 
         """
         INSERT INTO links (url, source_type, sender, context, content_type,
                            status, created_at, updated_at, download_path)
-        VALUES (?, 'signal', 'test', 'test', 'video',
+        VALUES (?, 'cli', 'test', 'test', 'video',
                 'archived', ?, ?, ?)
         """,
         (f"https://example.com/test-{days_ago}", created_at, updated_at, download_path),

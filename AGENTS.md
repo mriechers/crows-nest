@@ -1,6 +1,6 @@
 # Crow's Nest
 
-Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian content preservation pipeline**.
+Two systems in one repo: an **MCP knowledge server** and a **URL-to-Obsidian content preservation pipeline**.
 
 ## Pipeline
 
@@ -10,15 +10,13 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 
 | Source | Script | Mechanism |
 |--------|--------|-----------|
-| Signal messages | `pipeline/signal_listener.py` | Polls signal-cli, extracts URLs, sends confirmation reply |
-| iMessage self-messages | `pipeline/imessage_listener.py` | Polls local iMessage DB for messages you sent to yourself |
 | Cloudflare ingest queue | `pipeline/ingest_poller.py` | Drains D1 queue populated by Cloudflare Worker, marks items synced |
 | Obsidian vault | `pipeline/obsidian_scanner.py` | Scans for notes tagged `pending-clippings`, extracts URLs |
 | CLI | `pipeline/add_link.py` | Manually queue a URL |
 
 ### Stages
 
-1. **Listener** — Multiple input scripts save URLs to SQLite with `status='pending'`
+1. **Intake** — Input scripts save URLs to SQLite with `status='pending'`
 2. **Processor** (`pipeline/processor.py`) — Routes by content type: yt-dlp download, ffmpeg audio extraction, Whisper transcription, image conversion/resize, thumbnail extraction. Args: `--limit N` (default 20), `--drain` (loop until empty), `--db PATH`
 3. **Summarizer** (`pipeline/summarizer.py`) — Calls Claude Haiku via OpenRouter, writes Obsidian notes to `2 - AREAS/INTERNET CLIPPINGS/` with YAML frontmatter. Args: `--limit N` (default 5), `--drain`, `--db PATH`
 4. **Archiver** (`pipeline/archiver.py`) — Uploads media to R2 (`crows-nest-media-archive` bucket), generates share URLs via `share.bymarkriechers.com`, updates DB and Obsidian note. Web pages go to Readwise Reader instead. Args: `--db PATH`
@@ -26,7 +24,7 @@ Two systems in one repo: an **MCP knowledge server** and a **Signal-to-Obsidian 
 ### Key Files
 
 - `pipeline/config.py` — all paths derived from env vars (`CROWS_NEST_HOME`, `OBSIDIAN_VAULT`, `MEDIA_ROOT`, `CROWS_NEST_INGEST_API_URL`). Defaults to macOS dev paths; override for Linux.
-- `pipeline/db.py` — SQLite schema (links + processing_log + signal_messages + feeds + articles) and CRUD helpers
+- `pipeline/db.py` — SQLite schema (links + processing_log + feeds + articles) and CRUD helpers
 - `pipeline/content_types.py` — URL classification logic
 - `pipeline/status.py` — dashboard (`python status.py`) and health check (`python status.py --health`)
 - `pipeline/add_link.py` — CLI to manually queue URLs
@@ -62,8 +60,8 @@ python pipeline/cleanup_media.py --days 30 --dry-run   # preview cleanup
 
 ### Scheduling
 
-- **macOS**: launchd plists in `config/launchd/` (install to `~/Library/LaunchAgents/`). Plists exist for: listener, imessage-listener, ingest-poller, processor, summarizer, archiver, rss-refresh, obsidian-scanner.
-- **Linux**: systemd timer/service units in `config/systemd/` for listener, processor, summarizer, and archiver.
+- **macOS**: launchd plists in `config/launchd/` (install to `~/Library/LaunchAgents/`). Plists exist for: ingest-poller, processor, summarizer, archiver, rss-refresh, obsidian-scanner.
+- **Linux**: systemd timer/service units in `config/systemd/` for processor, summarizer, and archiver.
 
 ### Platform Portability
 

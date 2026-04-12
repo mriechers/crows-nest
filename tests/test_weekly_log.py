@@ -18,7 +18,7 @@ def test_creates_weekly_log_on_first_capture(tmp_path):
         title="Test Article",
         url="https://example.com/article",
         content_type="web_page",
-        source="Signal",
+        source="ingest-api",
         tags=["career-coaching", "burnout-recovery"],
         capture_date=date(2026, 3, 30),
     )
@@ -41,7 +41,7 @@ def test_appends_to_existing_weekly_log(tmp_path):
         title="First Video",
         url="https://youtube.com/watch?v=123",
         content_type="youtube",
-        source="Signal",
+        source="ingest-api",
         tags=["claude-code", "ai-agents"],
         capture_date=date(2026, 3, 30),
     )
@@ -50,7 +50,7 @@ def test_appends_to_existing_weekly_log(tmp_path):
         title="Second Article",
         url="https://example.com/news",
         content_type="web_page",
-        source="Signal",
+        source="ingest-api",
         tags=["horror-film", "movie-review"],
         capture_date=date(2026, 3, 31),
     )
@@ -88,7 +88,7 @@ def test_wikilink_preserves_collision_suffix(tmp_path):
         title="Duplicate Title (1)",
         url="https://example.com/dup",
         content_type="web_page",
-        source="Signal",
+        source="ingest-api",
         tags=[],
         capture_date=date(2026, 3, 30),
     )
@@ -133,7 +133,7 @@ def test_dynamic_section_creation(tmp_path):
         title="Horror Movie",
         url="https://example.com/horror",
         content_type="social_video",
-        source="Signal",
+        source="ingest-api",
         tags=["horror-film"],
         capture_date=date(2026, 3, 31),
     )
@@ -142,7 +142,7 @@ def test_dynamic_section_creation(tmp_path):
         title="Random Link",
         url="https://example.com/random",
         content_type="web_page",
-        source="Signal",
+        source="ingest-api",
         tags=[],
         capture_date=date(2026, 3, 31),
     )
@@ -174,7 +174,7 @@ def test_entries_land_under_correct_section(tmp_path):
             title=f"Marathon Tip {i}",
             url=f"https://example.com/marathon{i}",
             content_type="social_video",
-            source="Signal",
+            source="ingest-api",
             tags=["marathon-game", "gaming-tips"],
             capture_date=date(2026, 3, 30),
         )
@@ -195,7 +195,7 @@ def test_no_tags_uses_content_type_fallback(tmp_path):
         title="News Podcast",
         url="https://example.com/podcast",
         content_type="podcast",
-        source="Signal",
+        source="ingest-api",
         tags=[],
         capture_date=date(2026, 3, 30),
     )

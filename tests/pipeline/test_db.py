@@ -53,7 +53,7 @@ def test_add_link_and_get_pending(tmp_path):
 
     rowid = db.add_link(
         url="https://example.com/video",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="check this out",
         content_type="video",
@@ -66,7 +66,7 @@ def test_add_link_and_get_pending(tmp_path):
     assert len(pending) == 1
     assert pending[0]["url"] == "https://example.com/video"
     assert pending[0]["status"] == "pending"
-    assert pending[0]["source_type"] == "imessage"
+    assert pending[0]["source_type"] == "cli"
 
 
 def test_add_link_duplicate_raises(tmp_path):
@@ -75,7 +75,7 @@ def test_add_link_duplicate_raises(tmp_path):
 
     db.add_link(
         url="https://example.com/video",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="first",
         content_type="video",
@@ -85,7 +85,7 @@ def test_add_link_duplicate_raises(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         db.add_link(
             url="https://example.com/video",
-            source_type="imessage",
+            source_type="cli",
             sender="+15551234567",
             context="second",
             content_type="video",
@@ -99,7 +99,7 @@ def test_claim_link_atomic(tmp_path):
 
     link_id = db.add_link(
         url="https://example.com/video",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="test",
         content_type="video",
@@ -131,7 +131,7 @@ def test_update_status_changes_status_and_kwargs(tmp_path):
 
     link_id = db.add_link(
         url="https://example.com/video",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="test",
         content_type="video",
@@ -161,7 +161,7 @@ def test_log_processing_creates_entry(tmp_path):
 
     link_id = db.add_link(
         url="https://example.com/video",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="test",
         content_type="video",
