@@ -165,7 +165,7 @@ async function handleJobCreate(request, env) {
   if (body.id && !/^[a-zA-Z0-9_-]{1,128}$/.test(body.id)) {
     return Response.json({ error: "invalid id format" }, { status: 400 });
   }
-  const id = body.id || `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = body.id || crypto.randomUUID();
   const payload = JSON.stringify(body.payload || {});
   const priority = Number.isInteger(body.priority) ? body.priority : 0;
   const now = new Date().toISOString();
