@@ -63,3 +63,7 @@ MCP_TRANSPORT = os.environ.get("MCP_TRANSPORT", "stdio")
 MCP_SSE_HOST = os.environ.get("MCP_SSE_HOST", "127.0.0.1")
 MCP_SSE_PORT = int(os.environ.get("MCP_SSE_PORT", "27185"))
 
+# Streamable-HTTP transport settings (MCP_HOST/MCP_PORT for streamable-http)
+MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.environ.get("MCP_PORT", "27185"))
+
