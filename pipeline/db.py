@@ -54,17 +54,6 @@ CREATE INDEX IF NOT EXISTS idx_links_content_type
 CREATE INDEX IF NOT EXISTS idx_processing_log_link_id
     ON processing_log(link_id);
 
-CREATE TABLE IF NOT EXISTS signal_messages (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender      TEXT,
-    body        TEXT,
-    group_name  TEXT,
-    has_urls    BOOLEAN DEFAULT 0,
-    received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_signal_messages_sender ON signal_messages(sender);
-CREATE INDEX IF NOT EXISTS idx_signal_messages_received_at ON signal_messages(received_at);
 """
 
 RSS_SCHEMA = """

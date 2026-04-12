@@ -105,7 +105,6 @@ def build_frontmatter(
         lines.append(f"image-count: {metadata['image_count']}")
 
     if sender:
-        lines.append("via: signal")
         lines.append(f'sender: "{sender}"')
 
     lines.append("para: inbox")
@@ -144,7 +143,7 @@ def generate_note_content(
     # Shared via callout (separate from content subjects)
     if sender:
         saved_date = saved_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        sections.append(f"> [!info] Shared via Signal\n> Sent by **{sender}** on {saved_date}")
+        sections.append(f"> [!info] Shared by\n> Sent by **{sender}** on {saved_date}")
 
     # Thumbnail embed — inserted after sender callout, before summary
     # Skipped for image content (those use vault_filenames embeds below)
@@ -242,7 +241,7 @@ def generate_note_content(
 
     if sender:
         saved_date = saved_at or ""
-        source_lines.append(f"- **Shared via**: Signal from {sender}" +
+        source_lines.append(f"- **Shared by**: {sender}" +
                            (f" ({saved_date})" if saved_date else ""))
 
     if description:
@@ -300,7 +299,7 @@ def call_claude_for_summary(content: str, content_type: str, title: str = "",
     # Build context about sender vs creator
     sender_note = ""
     if sender:
-        sender_note = f"\n\nIMPORTANT: This content was shared via Signal by '{sender}'. They are NOT the creator of this content — do NOT list them under people mentioned. They are the person who shared/forwarded this link."
+        sender_note = f"\n\nIMPORTANT: This content was shared externally by '{sender}'. They are NOT the creator of this content — do NOT list them under people mentioned. They are the person who shared/forwarded this link."
     if creator:
         sender_note += f"\nThe content creator is '{creator}'."
 
@@ -313,7 +312,7 @@ def call_claude_for_summary(content: str, content_type: str, title: str = "",
 - "people": array of "**Name** — role/relevance" strings for people mentioned IN THE CONTENT (or empty array). Do NOT include the person who shared the link.
 - "related_links": array of any URLs, tools, products, repos, or named resources mentioned that someone might want to look up, formatted as "Name or description — context" (or empty array)
 - "followups": array of 1-3 actionable next steps or things to investigate further (or empty array)
-- "title": a clear, descriptive title for this content (5-10 words, like a good article headline — NOT the sender's name or "From Signal"). IMPORTANT: The title must be a real headline, never your own commentary or reasoning. If you are uncertain, write a best-guess descriptive title.{sender_note}
+- "title": a clear, descriptive title for this content (5-10 words, like a good article headline — NOT the sender's name). IMPORTANT: The title must be a real headline, never your own commentary or reasoning. If you are uncertain, write a best-guess descriptive title.{sender_note}
 
 Title hint: {title}
 
@@ -416,7 +415,7 @@ def call_claude_for_image_analysis(
 
     sender_note = ""
     if sender:
-        sender_note = f"\n\nThis image was shared via Signal by '{sender}'. Do NOT list them under people — they are the person who shared it, not a subject of the image."
+        sender_note = f"\n\nThis image was shared externally by '{sender}'. Do NOT list them under people — they are the person who shared it, not a subject of the image."
     if context:
         sender_note += f"\n\nContext from sender: {context}"
 

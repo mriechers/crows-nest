@@ -10,26 +10,28 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/PATH/TO/crows-nest/.venv/bin/python</string>
-        <string>/PATH/TO/crows-nest/pipeline/ingest_poller.py</string>
+        <string>/Users/mriechers/Developer/second-brain/crows-nest/.venv/bin/python</string>
+        <string>/Users/mriechers/Developer/second-brain/crows-nest/pipeline/ingest_poller.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/PATH/TO/crows-nest/pipeline</string>
+    <string>/Users/mriechers/Developer/second-brain/crows-nest/pipeline</string>
 
     <key>StartInterval</key>
     <integer>300</integer>
 
     <key>StandardOutPath</key>
-    <string>/PATH/TO/crows-nest/logs/launchd-ingest-poller.log</string>
+    <string>/Users/mriechers/.local/share/crows-nest/logs/ingest-poller.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/PATH/TO/crows-nest/logs/launchd-ingest-poller.log</string>
+    <string>/Users/mriechers/.local/share/crows-nest/logs/ingest-poller.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>USER</key>
+        <string>mriechers</string>
     </dict>
 
     <key>RunAtLoad</key>

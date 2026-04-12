@@ -19,7 +19,7 @@ def test_process_web_page_saves_markdown(tmp_path):
 
     link_id = db.add_link(
         url="https://example.com/article",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="interesting article",
         content_type="web_page",
@@ -63,7 +63,7 @@ def test_retry_increments_count(tmp_path, monkeypatch):
 
     link_id = db.add_link(
         url="https://example.com/fail",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="test",
         content_type="web_page",
@@ -95,7 +95,7 @@ def test_recover_stale_claims(tmp_path):
 
     link_id = db.add_link(
         url="https://example.com/stale",
-        source_type="imessage",
+        source_type="cli",
         sender="+15551234567",
         context="stale test",
         content_type="web_page",
@@ -145,14 +145,14 @@ def test_process_image_copies_to_media(tmp_path, monkeypatch):
     monkeypatch.setattr("processor.OBSIDIAN_ARCHIVE", fake_archive)
 
     # Create a fake JPEG attachment
-    src_dir = tmp_path / "signal-attachments"
+    src_dir = tmp_path / "test-attachments"
     src_dir.mkdir()
     fake_img = src_dir / "test123.jpg"
     fake_img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
 
     link_id = add_link(
-        url="signal-image://1000000-abcd1234",
-        source_type="signal",
+        url="https://example.com/image/1000000-abcd1234",
+        source_type="cli",
         sender="Test User",
         context="check this",
         content_type="image",
@@ -199,14 +199,14 @@ def test_process_image_metadata_has_vault_filenames(tmp_path, monkeypatch):
     fake_archive = str(tmp_path / "obsidian-archive")
     monkeypatch.setattr("processor.OBSIDIAN_ARCHIVE", fake_archive)
 
-    src_dir = tmp_path / "signal-attachments"
+    src_dir = tmp_path / "test-attachments"
     src_dir.mkdir()
     fake_img = src_dir / "test456.jpg"
     fake_img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
 
     link_id = add_link(
-        url="signal-image://2000000-efgh5678",
-        source_type="signal",
+        url="https://example.com/image/2000000-efgh5678",
+        source_type="cli",
         sender="Test User",
         context="",
         content_type="image",
@@ -387,8 +387,8 @@ def test_process_image_run_routing(tmp_path, monkeypatch):
     })
 
     link_id = add_link(
-        url="signal-image://3000000-xyz99999",
-        source_type="signal",
+        url="https://example.com/image/3000000-xyz99999",
+        source_type="cli",
         sender="Test Sender",
         context="routing test",
         content_type="image",

@@ -44,12 +44,11 @@ MEDIA_ROOT = os.environ.get(
 
 DATA_DIR = os.path.join(CROWS_NEST_HOME, "data")
 LOG_DIR = os.path.join(CROWS_NEST_HOME, "logs")
+LAUNCHD_LOG_DIR = os.path.expanduser("~/.local/share/crows-nest/logs")
 SCRIPTS_DIR = os.path.join(CROWS_NEST_HOME, "scripts")
 PIPELINE_DIR = os.path.join(CROWS_NEST_HOME, "pipeline")
 
 DB_PATH = os.path.join(DATA_DIR, "crows-nest.db")
-MESSAGE_LOG = os.path.join(LOG_DIR, "signal-messages.log")
-SIGNAL_HEALTH_FILE = os.path.join(LOG_DIR, "signal-health.json")
 WHISPER_SCRIPT = os.path.join(SCRIPTS_DIR, "whisper-transcribe.sh")
 
 OBSIDIAN_CLIPPINGS = os.path.join(OBSIDIAN_VAULT, "2 - AREAS", "INTERNET CLIPPINGS")
