@@ -64,6 +64,25 @@ def test_build_frontmatter_with_sender():
     assert "- video-clip" in result
 
 
+def test_write_obsidian_note_returns_absolute_path(tmp_path):
+    """write_obsidian_note returns an absolute path (callers convert for DB)."""
+    import summarizer
+
+    original = summarizer.OBSIDIAN_CLIPPINGS
+    summarizer.OBSIDIAN_CLIPPINGS = str(tmp_path)
+    try:
+        path = summarizer.write_obsidian_note(
+            title="Abs Path Note",
+            frontmatter="---\ntitle: Test\n---",
+            body="Content",
+            created_at="2026-04-12T10:00:00",
+        )
+        assert os.path.isabs(path)
+        assert os.path.exists(path)
+    finally:
+        summarizer.OBSIDIAN_CLIPPINGS = original
+
+
 def test_build_frontmatter_image():
     """Image frontmatter should include image-clip tag and image-count."""
     result = build_frontmatter(
