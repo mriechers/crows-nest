@@ -22,7 +22,7 @@ import shutil
 import sqlite3
 import sys
 
-from config import OBSIDIAN_CLIPPINGS, OBSIDIAN_VAULT
+from config import OBSIDIAN_CLIPPINGS, OBSIDIAN_VAULT, to_vault_relative
 from content_types import classify_url
 from db import DB_PATH, add_link, get_connection, init_db, update_status
 from utils import setup_logging
@@ -324,7 +324,7 @@ def sync_note(
                 update_status(
                     link_id=link_id,
                     status="summarized",
-                    obsidian_note_path=note_path,
+                    obsidian_note_path=to_vault_relative(note_path),
                     db_path=db_path,
                 )
                 logger.info("Registered in DB: %s (id=%d)", source_url, link_id)
@@ -336,7 +336,7 @@ def sync_note(
             update_status(
                 link_id=db_row["id"],
                 status=db_row["status"],
-                obsidian_note_path=note_path,
+                obsidian_note_path=to_vault_relative(note_path),
                 db_path=db_path,
             )
 
