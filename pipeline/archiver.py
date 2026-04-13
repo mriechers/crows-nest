@@ -19,6 +19,7 @@ import boto3
 import requests
 from botocore.config import Config as BotoConfig
 
+from config import to_abs_note_path
 from db import DB_PATH, claim_link, get_pending, log_processing, update_status
 from keychain_secrets import get_secret
 from utils import setup_logging
@@ -254,7 +255,7 @@ def run(db_path: str) -> None:
         link_id = link["id"]
         url = link["url"]
         media_dir = link.get("download_path")
-        obsidian_note = link.get("obsidian_note_path") or ""
+        obsidian_note = to_abs_note_path(link.get("obsidian_note_path") or "")
         content_type = link.get("content_type") or "unknown"
         captured_at = link.get("created_at") or ""
         video_path = link.get("video_path")
