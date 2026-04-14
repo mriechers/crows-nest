@@ -17,7 +17,7 @@ import urllib.request
 import urllib.error
 from datetime import date, datetime, timezone
 
-from config import OBSIDIAN_CLIPPINGS, OBSIDIAN_ARCHIVE, OBSIDIAN_VAULT
+from config import OBSIDIAN_CLIPPINGS, OBSIDIAN_ARCHIVE, OBSIDIAN_VAULT, to_vault_relative
 from db import get_pending, claim_link, update_status, log_processing
 from utils import sanitize_title, setup_logging
 from keychain_secrets import get_secret
@@ -1277,7 +1277,7 @@ def run(db_path: str, limit: int = 5, drain: bool = False) -> None:
                 update_status(
                     link_id=link_id,
                     status="summarized",
-                    obsidian_note_path=note_path,
+                    obsidian_note_path=to_vault_relative(note_path),
                     db_path=db_path,
                 )
                 log_processing(

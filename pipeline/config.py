@@ -60,6 +60,32 @@ OBSIDIAN_ARCHIVE = os.path.join(OBSIDIAN_VAULT, "4 - ARCHIVE")
 
 
 # ---------------------------------------------------------------------------
+# Vault-relative path helpers
+# ---------------------------------------------------------------------------
+
+def to_vault_relative(abs_path: str) -> str:
+    """Strip OBSIDIAN_VAULT prefix to get a vault-relative path for DB storage.
+
+    If the path doesn't start with OBSIDIAN_VAULT (already relative, or from
+    a different mount point), returns it unchanged.
+    """
+    vault = OBSIDIAN_VAULT.rstrip(os.sep) + os.sep
+    if abs_path.startswith(vault):
+        return abs_path[len(vault):]
+    return abs_path
+
+
+def to_abs_note_path(vault_relative: str) -> str:
+    """Reconstruct absolute path from a vault-relative DB value.
+
+    Returns empty string for empty/None input (common for links without notes).
+    """
+    if not vault_relative:
+        return ""
+    return os.path.join(OBSIDIAN_VAULT, vault_relative)
+
+
+# ---------------------------------------------------------------------------
 # Ingest API (Cloudflare Worker + D1 queue)
 # ---------------------------------------------------------------------------
 
