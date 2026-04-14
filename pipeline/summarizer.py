@@ -1016,6 +1016,127 @@ def categorize_from_tags(
     return CONTENT_TYPE_FALLBACK_MAP.get(content_type, "Other")
 
 
+def _categorize_via_llm(
+    title: str,
+    url: str,
+    content_type: str,
+    tags: list[str],
+    existing_sections: dict[str, list[str]],
+) -> dict:
+    """Ask Haiku to pick the best weekly-log section for a new entry.
+
+    Prefers consolidating into existing sections over creating new ones.
+    Also surfaces items from Other that could be reclassified now that a
+    related section exists.
+
+    Returns:
+        {"category": str, "reclassify": [{"title": str, "to": str}, ...]}
+    Fallback (on any failure):
+        {"category": "Other", "reclassify": []}
+    """
+    fallback = {"category": "Other", "reclassify": []}
+
+    api_key = get_secret("OPENROUTER_API_KEY")
+    if not api_key:
+        logger.warning("OPENROUTER_API_KEY not found, skipping LLM categorization")
+        return fallback
+
+    # Build a compact view of existing sections and their entries
+    sections_summary = "\n".join(
+        f"  - {name}: {len(entries)} item(s)"
+        + (f" (e.g. {entries[0]!r})" if entries else "")
+        for name, entries in existing_sections.items()
+    )
+
+    # Items currently under Other that could be reclassified
+    other_entries = existing_sections.get("Other", [])
+    other_list = "\n".join(f"  - {t}" for t in other_entries) if other_entries else "  (none)"
+
+    tags_str = ", ".join(tags) if tags else "(none)"
+
+    prompt = f"""You are categorizing a saved link for a weekly reading log.
+
+New item:
+  Title: {title}
+  URL: {url}
+  Content type: {content_type}
+  Tags: {tags_str}
+
+Existing sections in this week's log:
+{sections_summary}
+
+Items currently in "Other" (potential reclassification candidates):
+{other_list}
+
+Your task:
+1. Pick the best section for the new item. STRONGLY prefer an existing section over creating a new one. Only name a new section if the item clearly belongs to a topic that is not covered by any existing section.
+2. Optionally, list up to 2 items from "Other" that should be moved to a better section now that context exists.
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "category": "Section Name",
+  "reclassify": [
+    {{"title": "title of Other item", "to": "destination section"}}
+  ]
+}}
+
+Rules:
+- "category" must be a short title-case label (2-5 words).
+- "reclassify" may be an empty array if nothing in Other needs moving.
+- Do not include any explanation outside the JSON.
+"""
+
+    payload = json.dumps({
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 200,
+    }).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            OPENROUTER_API_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
+                "X-Title": "Crow's Nest Pipeline",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+
+        response = json.loads(raw)
+        assistant_text = response["choices"][0]["message"]["content"]
+    except Exception as exc:
+        logger.warning("LLM categorization API call failed (non-fatal): %s", exc)
+        return fallback
+
+    parsed = _extract_json(assistant_text)
+    if parsed is None or "category" not in parsed:
+        logger.warning("LLM categorization returned unparseable response, using fallback")
+        return fallback
+
+    category = parsed.get("category", "Other")
+    reclassify = parsed.get("reclassify", [])
+
+    # Sanitize reclassify: must be a list of dicts with title+to keys
+    if not isinstance(reclassify, list):
+        reclassify = []
+    reclassify = [
+        r for r in reclassify
+        if isinstance(r, dict) and "title" in r and "to" in r
+    ]
+
+    logger.info("LLM categorization: '%s' -> section '%s', reclassify=%d item(s)",
+                title, category, len(reclassify))
+    return {"category": category, "reclassify": reclassify}
+
+
 def _append_to_weekly_log(
     inbox_dir: str,
     title: str,

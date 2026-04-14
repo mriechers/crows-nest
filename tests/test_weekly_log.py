@@ -1,5 +1,7 @@
+import json
 import os
 import sys
+from unittest.mock import patch, MagicMock
 
 # pipeline/ must be on path so 'from config import ...' resolves inside summarizer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../pipeline"))
@@ -7,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../pipeline"))
 from datetime import date
 from pipeline.summarizer import (
     _append_to_weekly_log,
+    _categorize_via_llm,
     categorize_from_tags,
 )
 
@@ -203,3 +206,92 @@ def test_no_tags_uses_content_type_fallback(tmp_path):
     content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
     assert "## News & Current Events" in content
     assert "[[News Podcast]]" in content
+
+
+# ---------------------------------------------------------------------------
+# _categorize_via_llm tests
+# ---------------------------------------------------------------------------
+
+def _make_openrouter_response(category: str, reclassify: list | None = None) -> MagicMock:
+    """Build a mock urllib response that returns an OpenRouter-shaped JSON payload."""
+    payload = json.dumps({
+        "choices": [{
+            "message": {
+                "content": json.dumps({
+                    "category": category,
+                    "reclassify": reclassify or [],
+                })
+            }
+        }]
+    }).encode("utf-8")
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = payload
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
+
+
+def test_categorize_via_llm_picks_existing_section():
+    """LLM response naming an existing section is returned as-is."""
+    existing_sections = {
+        "AI & Dev Tools": ["Some AI Article"],
+        "Gaming": ["Marathon Clip"],
+        "Other": [],
+    }
+
+    mock_resp = _make_openrouter_response("AI & Dev Tools")
+
+    with patch("pipeline.summarizer.get_secret", return_value="fake-key"), \
+         patch("urllib.request.urlopen", return_value=mock_resp):
+        result = _categorize_via_llm(
+            title="Claude Code Tips",
+            url="https://youtube.com/watch?v=abc",
+            content_type="youtube",
+            tags=["claude-code", "ai-agents"],
+            existing_sections=existing_sections,
+        )
+
+    assert result["category"] == "AI & Dev Tools"
+    assert result["reclassify"] == []
+
+
+def test_categorize_via_llm_falls_back_on_api_error():
+    """Any API failure returns the safe fallback dict."""
+    existing_sections = {"Other": []}
+
+    with patch("pipeline.summarizer.get_secret", return_value="fake-key"), \
+         patch("urllib.request.urlopen", side_effect=Exception("connection refused")):
+        result = _categorize_via_llm(
+            title="Some Article",
+            url="https://example.com/article",
+            content_type="web_page",
+            tags=[],
+            existing_sections=existing_sections,
+        )
+
+    assert result == {"category": "Other", "reclassify": []}
+
+
+def test_categorize_via_llm_returns_reclassify_items():
+    """LLM response with reclassify items is returned correctly."""
+    existing_sections = {
+        "AI & Dev Tools": ["Some AI Article"],
+        "Other": ["Random Link", "Old Article"],
+    }
+    reclassify_items = [
+        {"title": "Random Link", "to": "AI & Dev Tools"},
+    ]
+    mock_resp = _make_openrouter_response("Gaming", reclassify_items)
+
+    with patch("pipeline.summarizer.get_secret", return_value="fake-key"), \
+         patch("urllib.request.urlopen", return_value=mock_resp):
+        result = _categorize_via_llm(
+            title="Marathon Highlight",
+            url="https://example.com/marathon",
+            content_type="social_video",
+            tags=["marathon-game"],
+            existing_sections=existing_sections,
+        )
+
+    assert result["category"] == "Gaming"
+    assert result["reclassify"] == reclassify_items
