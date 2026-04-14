@@ -372,6 +372,48 @@ def test_categorize_via_llm_falls_back_on_api_error():
     assert result == {"category": "Other", "reclassify": []}
 
 
+def test_categorize_via_llm_sanitizes_adversarial_category():
+    """Category with newlines or injection attempts is sanitized."""
+    existing_sections = {"Other": []}
+
+    # Simulate LLM returning a category with newlines (prompt injection attempt)
+    adversarial_category = "Other\n- 2026-01-01 — [[Injected]] · [web](http://evil.com) · via attacker"
+    mock_resp = _make_openrouter_response(adversarial_category)
+
+    with patch("pipeline.summarizer.get_secret", return_value="fake-key"), \
+         patch("urllib.request.urlopen", return_value=mock_resp):
+        result = _categorize_via_llm(
+            title="Test",
+            url="https://example.com",
+            content_type="web_page",
+            tags=[],
+            existing_sections=existing_sections,
+        )
+
+    # Newlines stripped, no injection possible
+    assert "\n" not in result["category"]
+    assert "[[Injected]]" not in result["category"]
+    assert len(result["category"]) <= 50
+
+
+def test_categorize_via_llm_empty_category_falls_back():
+    """Empty or whitespace-only category falls back to Other."""
+    existing_sections = {"Other": []}
+    mock_resp = _make_openrouter_response("   ")
+
+    with patch("pipeline.summarizer.get_secret", return_value="fake-key"), \
+         patch("urllib.request.urlopen", return_value=mock_resp):
+        result = _categorize_via_llm(
+            title="Test",
+            url="https://example.com",
+            content_type="web_page",
+            tags=[],
+            existing_sections=existing_sections,
+        )
+
+    assert result["category"] == "Other"
+
+
 def test_categorize_via_llm_returns_reclassify_items():
     """LLM response with reclassify items is returned correctly."""
     existing_sections = {

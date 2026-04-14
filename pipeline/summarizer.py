@@ -1042,6 +1042,12 @@ Rules:
         return fallback
 
     category = parsed.get("category", "Other")
+    # Sanitize category: only allow safe characters for a markdown header.
+    # Strip anything that could inject markdown structure or links.
+    if isinstance(category, str):
+        category = re.sub(r"[^\w &/'-]", "", category).strip()[:50]
+    if not category or not isinstance(category, str):
+        category = "Other"
     reclassify = parsed.get("reclassify", [])
 
     # Sanitize reclassify: must be a list of dicts with title+to keys
@@ -1063,8 +1069,6 @@ def _parse_weekly_sections(content: str) -> dict[str, list[str]]:
     Scans for ``## Section Name`` headers and extracts wikilink titles
     (``[[Title]]``) from entry lines under each section.
     """
-    import re
-
     sections: dict[str, list[str]] = {}
     current_section: str | None = None
 
