@@ -10,6 +10,7 @@ from datetime import date
 from pipeline.summarizer import (
     _append_to_weekly_log,
     _categorize_via_llm,
+    _parse_weekly_sections,
     categorize_from_tags,
 )
 
@@ -206,6 +207,64 @@ def test_no_tags_uses_content_type_fallback(tmp_path):
     content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
     assert "## News & Current Events" in content
     assert "[[News Podcast]]" in content
+
+
+# ---------------------------------------------------------------------------
+# _parse_weekly_sections tests
+# ---------------------------------------------------------------------------
+
+def test_parse_weekly_sections_basic():
+    """Extracts section names and entry titles from weekly log content."""
+    content = """\
+---
+title: "Weekly Links — 2026-W14"
+---
+# Weekly Links — 2026-W14
+
+## AI & Dev Tools
+- 2026-03-30 — [[Claude Code Tips]] · [youtube](https://yt.com/1) · via ingest-api
+- 2026-03-31 — [[LLM Patterns]] · [web_page](https://example.com) · via cli
+
+## Horror & Film
+- 2026-03-30 — [[Nosferatu Review]] · [web_page](https://example.com/horror) · via ingest-api
+
+## Other
+- 2026-03-31 — [[Random Link]] · [web_page](https://example.com/random) · via ingest-api
+"""
+    result = _parse_weekly_sections(content)
+    assert result == {
+        "AI & Dev Tools": ["Claude Code Tips", "LLM Patterns"],
+        "Horror & Film": ["Nosferatu Review"],
+        "Other": ["Random Link"],
+    }
+
+
+def test_parse_weekly_sections_empty_sections():
+    """Sections with no entries return empty lists."""
+    content = """\
+---
+title: "Weekly Links — 2026-W14"
+---
+# Weekly Links — 2026-W14
+
+## Gaming
+
+## Other
+"""
+    result = _parse_weekly_sections(content)
+    assert result == {"Gaming": [], "Other": []}
+
+
+def test_parse_weekly_sections_no_sections():
+    """File with no ## headers returns empty dict."""
+    content = """\
+---
+title: "Weekly Links — 2026-W14"
+---
+# Weekly Links — 2026-W14
+"""
+    result = _parse_weekly_sections(content)
+    assert result == {}
 
 
 # ---------------------------------------------------------------------------

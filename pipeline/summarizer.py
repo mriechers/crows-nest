@@ -1137,6 +1137,32 @@ Rules:
     return {"category": category, "reclassify": reclassify}
 
 
+def _parse_weekly_sections(content: str) -> dict[str, list[str]]:
+    """Parse a weekly log file into {section_name: [entry_titles]}.
+
+    Scans for ``## Section Name`` headers and extracts wikilink titles
+    (``[[Title]]``) from entry lines under each section.
+    """
+    import re
+
+    sections: dict[str, list[str]] = {}
+    current_section: str | None = None
+
+    for line in content.splitlines():
+        header_match = re.match(r"^## (.+)$", line)
+        if header_match:
+            current_section = header_match.group(1).strip()
+            sections[current_section] = []
+            continue
+
+        if current_section is not None:
+            wikilink_match = re.search(r"\[\[([^\]]+)\]\]", line)
+            if wikilink_match:
+                sections[current_section].append(wikilink_match.group(1))
+
+    return sections
+
+
 def _append_to_weekly_log(
     inbox_dir: str,
     title: str,
