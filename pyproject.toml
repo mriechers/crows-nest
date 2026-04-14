@@ -1,3 +1,17 @@
+# System-level runtime dependencies (not pip-installable via this package):
+#   yt-dlp       — video/audio downloader (brew install yt-dlp)
+#   ffmpeg       — audio extraction (brew install ffmpeg)
+#   whisper.cpp  — local speech-to-text (see pipeline/config.py)
+#
+# yt-dlp impersonation support (required for TikTok downloads):
+#   After installing yt-dlp via brew, install curl_cffi 0.10–0.14 into
+#   yt-dlp's own Python environment:
+#
+#     /opt/homebrew/Cellar/yt-dlp/<version>/libexec/bin/python3 \
+#         -m pip install "curl_cffi>=0.10,<0.15"
+#
+#   Verify with: yt-dlp --list-impersonate-targets
+
 [project]
 name = "crows-nest"
 version = "0.2.0"
