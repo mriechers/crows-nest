@@ -11,6 +11,7 @@ from pipeline.summarizer import (
     _append_to_weekly_log,
     _categorize_via_llm,
     _parse_weekly_sections,
+    _reclassify_entries,
     categorize_from_tags,
 )
 
@@ -265,6 +266,71 @@ title: "Weekly Links — 2026-W14"
 """
     result = _parse_weekly_sections(content)
     assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# _reclassify_entries tests
+# ---------------------------------------------------------------------------
+
+def test_reclassify_moves_entry_between_sections():
+    """Entry is removed from Other and placed under the target section."""
+    lines = [
+        "## AI & Dev Tools\n",
+        "- 2026-03-30 — [[Claude Tips]] · [youtube](https://yt.com/1) · via ingest-api\n",
+        "\n",
+        "## Other\n",
+        "- 2026-03-31 — [[LLM Patterns]] · [web_page](https://ex.com) · via cli\n",
+        "- 2026-03-31 — [[Random Link]] · [web_page](https://ex.com/r) · via cli\n",
+    ]
+    reclassify = [{"title": "LLM Patterns", "to": "AI & Dev Tools"}]
+    result = _reclassify_entries(lines, reclassify)
+
+    text = "".join(result)
+    # LLM Patterns should now be under AI & Dev Tools
+    ai_section = text.split("## AI & Dev Tools")[1].split("## ")[0]
+    assert "[[LLM Patterns]]" in ai_section
+    # And removed from Other
+    other_section = text.split("## Other")[1]
+    assert "[[LLM Patterns]]" not in other_section
+    assert "[[Random Link]]" in other_section
+
+
+def test_reclassify_creates_new_section_before_other():
+    """If the target section doesn't exist, it's created before Other."""
+    lines = [
+        "## Other\n",
+        "- 2026-03-31 — [[Horror Movie]] · [web_page](https://ex.com) · via cli\n",
+    ]
+    reclassify = [{"title": "Horror Movie", "to": "Horror & Film"}]
+    result = _reclassify_entries(lines, reclassify)
+
+    text = "".join(result)
+    assert "## Horror & Film" in text
+    # New section should appear before Other
+    horror_pos = text.index("## Horror & Film")
+    other_pos = text.index("## Other")
+    assert horror_pos < other_pos
+    # Entry moved
+    horror_section = text.split("## Horror & Film")[1].split("## ")[0]
+    assert "[[Horror Movie]]" in horror_section
+
+
+def test_reclassify_no_match_is_noop():
+    """If the title doesn't match any entry, lines are unchanged."""
+    lines = [
+        "## Other\n",
+        "- 2026-03-31 — [[Something]] · [web_page](https://ex.com) · via cli\n",
+    ]
+    reclassify = [{"title": "Nonexistent Title", "to": "AI & Dev Tools"}]
+    result = _reclassify_entries(lines, reclassify)
+    assert result == lines
+
+
+def test_reclassify_empty_instructions():
+    """Empty reclassify list returns lines unchanged."""
+    lines = ["## Other\n", "- entry\n"]
+    result = _reclassify_entries(lines, [])
+    assert result == lines
 
 
 # ---------------------------------------------------------------------------

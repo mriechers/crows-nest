@@ -1163,6 +1163,70 @@ def _parse_weekly_sections(content: str) -> dict[str, list[str]]:
     return sections
 
 
+def _reclassify_entries(
+    lines: list[str],
+    reclassify: list[dict[str, str]],
+) -> list[str]:
+    """Move entries between sections in a weekly log lines array.
+
+    Each item in *reclassify* is ``{"title": "...", "to": "Section Name"}``.
+    The entry line containing ``[[title]]`` is removed from its current
+    position and appended under the target ``## Section Name`` header,
+    which is created before ``## Other`` if it doesn't exist yet.
+
+    Returns a new list; the original is not mutated.
+    """
+    if not reclassify:
+        return lines
+
+    result = list(lines)  # shallow copy
+
+    for instruction in reclassify:
+        title = instruction.get("title", "")
+        target_section = instruction.get("to", "")
+        if not title or not target_section:
+            continue
+
+        # Find and remove the entry line containing [[title]]
+        marker = f"[[{title}]]"
+        removed_line = None
+        for i, line in enumerate(result):
+            if marker in line:
+                removed_line = result.pop(i)
+                break
+
+        if removed_line is None:
+            continue
+
+        # Find the target section header
+        target_header = f"## {target_section}\n"
+        target_idx = None
+        for i, line in enumerate(result):
+            if line == target_header:
+                target_idx = i
+                break
+
+        if target_idx is not None:
+            # Insert after the header
+            result.insert(target_idx + 1, removed_line)
+        else:
+            # Create the section before ## Other
+            other_idx = None
+            for i, line in enumerate(result):
+                if line == "## Other\n":
+                    other_idx = i
+                    break
+
+            if other_idx is not None:
+                result.insert(other_idx, f"\n{target_header}\n")
+                result.insert(other_idx + 1, removed_line)
+            else:
+                result.append(f"\n{target_header}\n")
+                result.append(removed_line)
+
+    return result
+
+
 def _append_to_weekly_log(
     inbox_dir: str,
     title: str,
