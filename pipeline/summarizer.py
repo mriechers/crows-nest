@@ -918,71 +918,6 @@ def write_obsidian_note(title: str, frontmatter: str, body: str,
 
 # --- Weekly Links Log ---
 
-# Ordered tag-to-category rules. First matching rule wins.
-# Each rule is (set_of_tags, category_name).
-TAG_CATEGORY_RULES: list[tuple[set[str], str]] = [
-    (
-        {"marathon-game", "marathon-guide", "marathon-solo", "marathon-farming"},
-        "Gaming",
-    ),
-    (
-        {"gaming-tips", "pvp-strategy", "extraction-games", "game-mechanics",
-         "indie-games", "character-builds", "speedrun"},
-        "Gaming",
-    ),
-    (
-        {"claude-code", "ai-agents", "mcp-server", "prompt-engineering",
-         "llm-tools", "context-engineering", "workflow-automation",
-         "developer-tools", "ai-automation", "harness-engineering",
-         "browser-automation", "local-llm", "ai-workflows", "coding-agents"},
-        "AI & Dev Tools",
-    ),
-    (
-        {"horror-film", "horror-movies", "psychological-horror", "analog-horror",
-         "found-footage", "cosmic-horror", "supernatural-horror", "horror-games",
-         "movie-review", "film-review", "movie-recommendation", "thriller",
-         "horror-nostalgia", "horror-content"},
-        "Horror & Film",
-    ),
-    (
-        {"career-coaching", "burnout-recovery", "professional-development",
-         "leadership", "workplace-culture", "management-leadership",
-         "employee-engagement", "toxic-workplace", "executive-education"},
-        "Work & Leadership",
-    ),
-    (
-        {"activism", "surveillance-capitalism", "ai-ethics", "corporate-lobbying",
-         "regulatory-capture", "government-technology", "digital-rights",
-         "content-moderation", "deepfake", "ai-satire", "privatization"},
-        "Politics & Society",
-    ),
-    (
-        {"relationships", "personal-growth", "self-care", "philosophy",
-         "self-love", "existentialism", "communication-skills",
-         "emotional-intelligence", "heartbreak", "dating-advice"},
-        "Personal Growth",
-    ),
-    (
-        {"3d-printing", "self-hosting", "open-source", "single-board-computer",
-         "home-lab", "video-codec", "web-development", "right-to-repair",
-         "iphone-customization", "open-source-hardware"},
-        "Tech & Hardware",
-    ),
-    (
-        {"home-cleaning", "desk-organization", "phone-accessories",
-         "interior-design", "room-divider", "fashion-trends", "workspace-setup",
-         "sustainable-products"},
-        "Products & Home",
-    ),
-]
-
-# Content-type fallback for entries with no matching tags.
-CONTENT_TYPE_FALLBACK_MAP = {
-    "podcast": "News & Current Events",
-    "audio": "News & Current Events",
-    "image": "Images",
-}
-
 WEEKLY_LOG_TEMPLATE = """---
 title: "Weekly Links — {week_label}"
 created: {created}
@@ -1000,20 +935,222 @@ tags:
 """
 
 
-def categorize_from_tags(
-    tags: list[str],
-    content_type: str = "web_page",
-) -> str:
-    """Determine a topic category from a note's tags.
 
-    Checks tags against TAG_CATEGORY_RULES in priority order.
-    Falls back to content-type mapping, then "Other".
+def _categorize_via_llm(
+    title: str,
+    url: str,
+    content_type: str,
+    tags: list[str],
+    existing_sections: dict[str, list[str]],
+) -> dict:
+    """Ask Haiku to pick the best weekly-log section for a new entry.
+
+    Prefers consolidating into existing sections over creating new ones.
+    Also surfaces items from Other that could be reclassified now that a
+    related section exists.
+
+    Returns:
+        {"category": str, "reclassify": [{"title": str, "to": str}, ...]}
+    Fallback (on any failure):
+        {"category": "Other", "reclassify": []}
     """
-    tag_set = set(tags)
-    for rule_tags, category in TAG_CATEGORY_RULES:
-        if tag_set & rule_tags:
-            return category
-    return CONTENT_TYPE_FALLBACK_MAP.get(content_type, "Other")
+    fallback = {"category": "Other", "reclassify": []}
+
+    api_key = get_secret("OPENROUTER_API_KEY")
+    if not api_key:
+        logger.warning("OPENROUTER_API_KEY not found, skipping LLM categorization")
+        return fallback
+
+    # Build a compact view of existing sections and their entries
+    sections_summary = "\n".join(
+        f"  - {name}: {len(entries)} item(s)"
+        + (f" (e.g. {entries[0]!r})" if entries else "")
+        for name, entries in existing_sections.items()
+    )
+
+    # Items currently under Other that could be reclassified
+    other_entries = existing_sections.get("Other", [])
+    other_list = "\n".join(f"  - {t}" for t in other_entries) if other_entries else "  (none)"
+
+    tags_str = ", ".join(tags) if tags else "(none)"
+
+    prompt = f"""You are categorizing a saved link for a weekly reading log.
+
+New item:
+  Title: {title}
+  URL: {url}
+  Content type: {content_type}
+  Tags: {tags_str}
+
+Existing sections in this week's log:
+{sections_summary}
+
+Items currently in "Other" (potential reclassification candidates):
+{other_list}
+
+Your task:
+1. Pick the best section for the new item. STRONGLY prefer an existing section over creating a new one. Only name a new section if the item clearly belongs to a topic that is not covered by any existing section.
+2. Optionally, list up to 2 items from "Other" that should be moved to a better section now that context exists.
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "category": "Section Name",
+  "reclassify": [
+    {{"title": "title of Other item", "to": "destination section"}}
+  ]
+}}
+
+Rules:
+- "category" must be a short title-case label (2-5 words).
+- "reclassify" may be an empty array if nothing in Other needs moving.
+- Do not include any explanation outside the JSON.
+"""
+
+    payload = json.dumps({
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 200,
+    }).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            OPENROUTER_API_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://github.com/crows-nest-pipeline/crows-nest",
+                "X-Title": "Crow's Nest Pipeline",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+
+        response = json.loads(raw)
+        assistant_text = response["choices"][0]["message"]["content"]
+    except Exception as exc:
+        logger.warning("LLM categorization API call failed (non-fatal): %s", exc)
+        return fallback
+
+    parsed = _extract_json(assistant_text)
+    if parsed is None or "category" not in parsed:
+        logger.warning("LLM categorization returned unparseable response, using fallback")
+        return fallback
+
+    category = parsed.get("category", "Other")
+    # Sanitize category: only allow safe characters for a markdown header.
+    # Strip anything that could inject markdown structure or links.
+    if isinstance(category, str):
+        category = re.sub(r"[^\w &/'-]", "", category).strip()[:50]
+    if not category or not isinstance(category, str):
+        category = "Other"
+    reclassify = parsed.get("reclassify", [])
+
+    # Sanitize reclassify: must be a list of dicts with title+to keys
+    if not isinstance(reclassify, list):
+        reclassify = []
+    reclassify = [
+        r for r in reclassify
+        if isinstance(r, dict) and "title" in r and "to" in r
+    ]
+
+    logger.info("LLM categorization: '%s' -> section '%s', reclassify=%d item(s)",
+                title, category, len(reclassify))
+    return {"category": category, "reclassify": reclassify}
+
+
+def _parse_weekly_sections(content: str) -> dict[str, list[str]]:
+    """Parse a weekly log file into {section_name: [entry_titles]}.
+
+    Scans for ``## Section Name`` headers and extracts wikilink titles
+    (``[[Title]]``) from entry lines under each section.
+    """
+    sections: dict[str, list[str]] = {}
+    current_section: str | None = None
+
+    for line in content.splitlines():
+        header_match = re.match(r"^## (.+)$", line)
+        if header_match:
+            current_section = header_match.group(1).strip()
+            sections[current_section] = []
+            continue
+
+        if current_section is not None:
+            wikilink_match = re.search(r"\[\[([^\]]+)\]\]", line)
+            if wikilink_match:
+                sections[current_section].append(wikilink_match.group(1))
+
+    return sections
+
+
+def _reclassify_entries(
+    lines: list[str],
+    reclassify: list[dict[str, str]],
+) -> list[str]:
+    """Move entries between sections in a weekly log lines array.
+
+    Each item in *reclassify* is ``{"title": "...", "to": "Section Name"}``.
+    The entry line containing ``[[title]]`` is removed from its current
+    position and appended under the target ``## Section Name`` header,
+    which is created before ``## Other`` if it doesn't exist yet.
+
+    Returns a new list; the original is not mutated.
+    """
+    if not reclassify:
+        return lines
+
+    result = list(lines)  # shallow copy
+
+    for instruction in reclassify:
+        title = instruction.get("title", "")
+        target_section = instruction.get("to", "")
+        if not title or not target_section:
+            continue
+
+        # Find and remove the entry line containing [[title]]
+        marker = f"[[{title}]]"
+        removed_line = None
+        for i, line in enumerate(result):
+            if marker in line:
+                removed_line = result.pop(i)
+                break
+
+        if removed_line is None:
+            continue
+
+        # Find the target section header
+        target_header = f"## {target_section}\n"
+        target_idx = None
+        for i, line in enumerate(result):
+            if line == target_header:
+                target_idx = i
+                break
+
+        if target_idx is not None:
+            # Insert after the header
+            result.insert(target_idx + 1, removed_line)
+        else:
+            # Create the section before ## Other
+            other_idx = None
+            for i, line in enumerate(result):
+                if line == "## Other\n":
+                    other_idx = i
+                    break
+
+            if other_idx is not None:
+                result.insert(other_idx, "\n")
+                result.insert(other_idx + 1, target_header)
+                result.insert(other_idx + 2, removed_line)
+            else:
+                result.append("\n")
+                result.append(target_header)
+                result.append(removed_line)
+
+    return result
 
 
 def _append_to_weekly_log(
@@ -1055,12 +1192,28 @@ def _append_to_weekly_log(
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
-    section = categorize_from_tags(tags or [], content_type)
+    with open(filepath, "r", encoding="utf-8") as f:
+        file_content = f.read()
+
+    # Ask the LLM to categorize, seeing existing sections for context
+    existing_sections = _parse_weekly_sections(file_content)
+    llm_result = _categorize_via_llm(
+        title=title,
+        url=url,
+        content_type=content_type,
+        tags=tags or [],
+        existing_sections=existing_sections,
+    )
+    section = llm_result["category"]
+
     entry_line = f"- {capture_date.isoformat()} \u2014 [[{sanitize_title(title)}]] \u00b7 [{content_type}]({url}) \u00b7 via {source}\n"
 
-    with open(filepath, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    lines = file_content.splitlines(keepends=True)
 
+    # Apply any reclassifications the LLM suggested
+    lines = _reclassify_entries(lines, llm_result.get("reclassify", []))
+
+    # Insert the new entry under the appropriate section
     section_header = f"## {section}\n"
     inserted = False
     for i, line in enumerate(lines):
@@ -1078,8 +1231,6 @@ def _append_to_weekly_log(
                 break
         if other_idx is not None:
             lines.insert(other_idx, f"\n{section_header}\n")
-            # list.insert adds one element regardless of embedded newlines,
-            # so the entry goes at other_idx + 1 (right after the header).
             lines.insert(other_idx + 1, entry_line)
         else:
             lines.append(f"\n{section_header}\n")
