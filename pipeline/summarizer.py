@@ -1218,10 +1218,12 @@ def _reclassify_entries(
                     break
 
             if other_idx is not None:
-                result.insert(other_idx, f"\n{target_header}\n")
-                result.insert(other_idx + 1, removed_line)
+                result.insert(other_idx, "\n")
+                result.insert(other_idx + 1, target_header)
+                result.insert(other_idx + 2, removed_line)
             else:
-                result.append(f"\n{target_header}\n")
+                result.append("\n")
+                result.append(target_header)
                 result.append(removed_line)
 
     return result
@@ -1266,12 +1268,28 @@ def _append_to_weekly_log(
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
-    section = categorize_from_tags(tags or [], content_type)
+    with open(filepath, "r", encoding="utf-8") as f:
+        file_content = f.read()
+
+    # Ask the LLM to categorize, seeing existing sections for context
+    existing_sections = _parse_weekly_sections(file_content)
+    llm_result = _categorize_via_llm(
+        title=title,
+        url=url,
+        content_type=content_type,
+        tags=tags or [],
+        existing_sections=existing_sections,
+    )
+    section = llm_result["category"]
+
     entry_line = f"- {capture_date.isoformat()} \u2014 [[{sanitize_title(title)}]] \u00b7 [{content_type}]({url}) \u00b7 via {source}\n"
 
-    with open(filepath, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    lines = file_content.splitlines(keepends=True)
 
+    # Apply any reclassifications the LLM suggested
+    lines = _reclassify_entries(lines, llm_result.get("reclassify", []))
+
+    # Insert the new entry under the appropriate section
     section_header = f"## {section}\n"
     inserted = False
     for i, line in enumerate(lines):
@@ -1289,8 +1307,6 @@ def _append_to_weekly_log(
                 break
         if other_idx is not None:
             lines.insert(other_idx, f"\n{section_header}\n")
-            # list.insert adds one element regardless of embedded newlines,
-            # so the entry goes at other_idx + 1 (right after the header).
             lines.insert(other_idx + 1, entry_line)
         else:
             lines.append(f"\n{section_header}\n")

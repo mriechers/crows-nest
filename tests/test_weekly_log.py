@@ -16,17 +16,26 @@ from pipeline.summarizer import (
 )
 
 
+def _mock_llm(category, reclassify=None):
+    """Return a patch context that mocks _categorize_via_llm to return given category."""
+    return patch(
+        "pipeline.summarizer._categorize_via_llm",
+        return_value={"category": category, "reclassify": reclassify or []},
+    )
+
+
 def test_creates_weekly_log_on_first_capture(tmp_path):
     """First capture of the week creates the weekly log file."""
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="Test Article",
-        url="https://example.com/article",
-        content_type="web_page",
-        source="ingest-api",
-        tags=["career-coaching", "burnout-recovery"],
-        capture_date=date(2026, 3, 30),
-    )
+    with _mock_llm("Work & Leadership"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Test Article",
+            url="https://example.com/article",
+            content_type="web_page",
+            source="ingest-api",
+            tags=["career-coaching", "burnout-recovery"],
+            capture_date=date(2026, 3, 30),
+        )
 
     log_path = tmp_path / "Weekly Links — 2026-W14.md"
     assert log_path.exists()
@@ -41,45 +50,47 @@ def test_creates_weekly_log_on_first_capture(tmp_path):
 
 def test_appends_to_existing_weekly_log(tmp_path):
     """Second capture appends to existing file under correct section."""
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="First Video",
-        url="https://youtube.com/watch?v=123",
-        content_type="youtube",
-        source="ingest-api",
-        tags=["claude-code", "ai-agents"],
-        capture_date=date(2026, 3, 30),
-    )
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="Second Article",
-        url="https://example.com/news",
-        content_type="web_page",
-        source="ingest-api",
-        tags=["horror-film", "movie-review"],
-        capture_date=date(2026, 3, 31),
-    )
+    with _mock_llm("AI & Dev Tools"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="First Video",
+            url="https://youtube.com/watch?v=123",
+            content_type="youtube",
+            source="ingest-api",
+            tags=["claude-code", "ai-agents"],
+            capture_date=date(2026, 3, 30),
+        )
+    with _mock_llm("Horror & Film"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Second Article",
+            url="https://example.com/news",
+            content_type="web_page",
+            source="ingest-api",
+            tags=["horror-film", "movie-review"],
+            capture_date=date(2026, 3, 31),
+        )
 
     log_path = tmp_path / "Weekly Links — 2026-W14.md"
     content = log_path.read_text()
     assert "[[First Video]]" in content
     assert "[[Second Article]]" in content
-    # Each should be in its own section
     assert "## AI & Dev Tools" in content
     assert "## Horror & Film" in content
 
 
 def test_wikilink_uses_sanitized_title(tmp_path):
     """Wikilinks should use the sanitized title to match the actual filename."""
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="Claude How-To: From Basics to Advanced",
-        url="https://example.com/video",
-        content_type="social_video",
-        source="cli",
-        tags=["claude-code"],
-        capture_date=date(2026, 3, 30),
-    )
+    with _mock_llm("AI & Dev Tools"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Claude How-To: From Basics to Advanced",
+            url="https://example.com/video",
+            content_type="social_video",
+            source="cli",
+            tags=["claude-code"],
+            capture_date=date(2026, 3, 30),
+        )
 
     content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
     assert "[[Claude How-To From Basics to Advanced]]" in content
@@ -88,69 +99,53 @@ def test_wikilink_uses_sanitized_title(tmp_path):
 
 def test_wikilink_preserves_collision_suffix(tmp_path):
     """When caller passes a filename stem with collision suffix, wikilink uses it as-is."""
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="Duplicate Title (1)",
-        url="https://example.com/dup",
-        content_type="web_page",
-        source="ingest-api",
-        tags=[],
-        capture_date=date(2026, 3, 30),
-    )
+    with _mock_llm("Other"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Duplicate Title (1)",
+            url="https://example.com/dup",
+            content_type="web_page",
+            source="ingest-api",
+            tags=[],
+            capture_date=date(2026, 3, 30),
+        )
 
     content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
     assert "[[Duplicate Title (1)]]" in content
 
 
-def test_categorize_from_tags_priority():
-    """First matching rule wins when tags span multiple categories."""
-    # Marathon-specific tags should match Gaming, not the broader gaming rule
-    assert categorize_from_tags(["marathon-game", "pvp-strategy"]) == "Gaming"
-    # AI tags win
-    assert categorize_from_tags(["claude-code", "prompt-engineering"]) == "AI & Dev Tools"
-    # Horror tags
-    assert categorize_from_tags(["horror-film", "psychological-horror"]) == "Horror & Film"
-    # Work tags
-    assert categorize_from_tags(["burnout-recovery", "career-coaching"]) == "Work & Leadership"
-
-
-def test_categorize_from_tags_fallback():
-    """No matching tags falls back to content-type, then Other."""
-    assert categorize_from_tags([], "podcast") == "News & Current Events"
-    assert categorize_from_tags([], "image") == "Images"
-    assert categorize_from_tags([], "web_page") == "Other"
-    assert categorize_from_tags([]) == "Other"
-
-
 def test_dynamic_section_creation(tmp_path):
     """New sections are created dynamically before Other."""
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="AI Tool",
-        url="https://example.com/ai",
-        content_type="social_video",
-        source="cli",
-        tags=["claude-code"],
-        capture_date=date(2026, 3, 30),
-    )
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="Horror Movie",
-        url="https://example.com/horror",
-        content_type="social_video",
-        source="ingest-api",
-        tags=["horror-film"],
-        capture_date=date(2026, 3, 31),
-    )
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="Random Link",
-        url="https://example.com/random",
-        content_type="web_page",
-        source="ingest-api",
-        tags=[],
-        capture_date=date(2026, 3, 31),
-    )
+    with _mock_llm("AI & Dev Tools"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="AI Tool",
+            url="https://example.com/ai",
+            content_type="social_video",
+            source="cli",
+            tags=["claude-code"],
+            capture_date=date(2026, 3, 30),
+        )
+    with _mock_llm("Horror & Film"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Horror Movie",
+            url="https://example.com/horror",
+            content_type="social_video",
+            source="ingest-api",
+            tags=["horror-film"],
+            capture_date=date(2026, 3, 31),
+        )
+    with _mock_llm("Other"):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Random Link",
+            url="https://example.com/random",
+            content_type="web_page",
+            source="ingest-api",
+            tags=[],
+            capture_date=date(2026, 3, 31),
+        )
 
     content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
     # Topic sections should appear before Other
@@ -160,7 +155,6 @@ def test_dynamic_section_creation(tmp_path):
     assert ai_pos < other_pos
     assert horror_pos < other_pos
     # Entries land under their own section, not under Other
-    # split("## ")[1] gives text after the header up to the next section
     ai_section = content[ai_pos:].split("## ")[1]
     assert "[[AI Tool]]" in ai_section
     horror_section = content[horror_pos:].split("## ")[1]
@@ -173,41 +167,23 @@ def test_dynamic_section_creation(tmp_path):
 
 def test_entries_land_under_correct_section(tmp_path):
     """Multiple entries in the same category all go under the same section."""
-    for i in range(3):
-        _append_to_weekly_log(
-            inbox_dir=str(tmp_path),
-            title=f"Marathon Tip {i}",
-            url=f"https://example.com/marathon{i}",
-            content_type="social_video",
-            source="ingest-api",
-            tags=["marathon-game", "gaming-tips"],
-            capture_date=date(2026, 3, 30),
-        )
+    with _mock_llm("Gaming"):
+        for i in range(3):
+            _append_to_weekly_log(
+                inbox_dir=str(tmp_path),
+                title=f"Marathon Tip {i}",
+                url=f"https://example.com/marathon{i}",
+                content_type="social_video",
+                source="ingest-api",
+                tags=["marathon-game", "gaming-tips"],
+                capture_date=date(2026, 3, 30),
+            )
 
     content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
-    # Only one Gaming section header
     assert content.count("## Gaming") == 1
-    # All three entries are under the Gaming section, not Other
     gaming_section = content.split("## Gaming")[1].split("## ")[0]
     for i in range(3):
         assert f"[[Marathon Tip {i}]]" in gaming_section
-
-
-def test_no_tags_uses_content_type_fallback(tmp_path):
-    """Entries with no tags use content-type fallback for categorization."""
-    _append_to_weekly_log(
-        inbox_dir=str(tmp_path),
-        title="News Podcast",
-        url="https://example.com/podcast",
-        content_type="podcast",
-        source="ingest-api",
-        tags=[],
-        capture_date=date(2026, 3, 30),
-    )
-
-    content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
-    assert "## News & Current Events" in content
-    assert "[[News Podcast]]" in content
 
 
 # ---------------------------------------------------------------------------
@@ -420,3 +396,90 @@ def test_categorize_via_llm_returns_reclassify_items():
 
     assert result["category"] == "Gaming"
     assert result["reclassify"] == reclassify_items
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: _append_to_weekly_log with mocked LLM
+# ---------------------------------------------------------------------------
+
+def test_append_uses_llm_categorization(tmp_path):
+    """_append_to_weekly_log uses LLM to pick the section."""
+    llm_result = {"category": "AI & Dev Tools", "reclassify": []}
+
+    with patch("pipeline.summarizer._categorize_via_llm", return_value=llm_result):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Claude Tips",
+            url="https://example.com/tips",
+            content_type="youtube",
+            source="ingest-api",
+            tags=["claude-code"],
+            capture_date=date(2026, 3, 30),
+        )
+
+    content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
+    assert "## AI & Dev Tools" in content
+    assert "[[Claude Tips]]" in content
+    # Entry is under AI & Dev Tools, not Other
+    ai_section = content.split("## AI & Dev Tools")[1].split("## ")[0]
+    assert "[[Claude Tips]]" in ai_section
+
+
+def test_append_llm_fallback_lands_in_other(tmp_path):
+    """When LLM falls back to Other, entry goes under Other."""
+    llm_result = {"category": "Other", "reclassify": []}
+
+    with patch("pipeline.summarizer._categorize_via_llm", return_value=llm_result):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Random Link",
+            url="https://example.com/random",
+            content_type="web_page",
+            source="cli",
+            tags=[],
+            capture_date=date(2026, 3, 30),
+        )
+
+    content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
+    other_section = content.split("## Other")[1]
+    assert "[[Random Link]]" in other_section
+
+
+def test_append_with_reclassification(tmp_path):
+    """LLM reclassify instructions move existing entries between sections."""
+    # First entry goes to Other (no LLM reclassify on first call)
+    with patch("pipeline.summarizer._categorize_via_llm",
+               return_value={"category": "Other", "reclassify": []}):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Early AI Article",
+            url="https://example.com/ai1",
+            content_type="web_page",
+            source="ingest-api",
+            tags=[],
+            capture_date=date(2026, 3, 30),
+        )
+
+    # Second entry — LLM now recognizes the AI theme and reclassifies
+    with patch("pipeline.summarizer._categorize_via_llm",
+               return_value={
+                   "category": "AI & Dev Tools",
+                   "reclassify": [{"title": "Early AI Article", "to": "AI & Dev Tools"}],
+               }):
+        _append_to_weekly_log(
+            inbox_dir=str(tmp_path),
+            title="Claude Deep Dive",
+            url="https://example.com/ai2",
+            content_type="youtube",
+            source="ingest-api",
+            tags=["claude-code"],
+            capture_date=date(2026, 3, 31),
+        )
+
+    content = (tmp_path / "Weekly Links — 2026-W14.md").read_text()
+    ai_section = content.split("## AI & Dev Tools")[1].split("## ")[0]
+    assert "[[Claude Deep Dive]]" in ai_section
+    assert "[[Early AI Article]]" in ai_section
+    # Other should no longer have Early AI Article
+    other_section = content.split("## Other")[1]
+    assert "[[Early AI Article]]" not in other_section
