@@ -12,7 +12,6 @@ from pipeline.summarizer import (
     _categorize_via_llm,
     _parse_weekly_sections,
     _reclassify_entries,
-    categorize_from_tags,
 )
 
 

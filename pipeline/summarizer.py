@@ -918,71 +918,6 @@ def write_obsidian_note(title: str, frontmatter: str, body: str,
 
 # --- Weekly Links Log ---
 
-# Ordered tag-to-category rules. First matching rule wins.
-# Each rule is (set_of_tags, category_name).
-TAG_CATEGORY_RULES: list[tuple[set[str], str]] = [
-    (
-        {"marathon-game", "marathon-guide", "marathon-solo", "marathon-farming"},
-        "Gaming",
-    ),
-    (
-        {"gaming-tips", "pvp-strategy", "extraction-games", "game-mechanics",
-         "indie-games", "character-builds", "speedrun"},
-        "Gaming",
-    ),
-    (
-        {"claude-code", "ai-agents", "mcp-server", "prompt-engineering",
-         "llm-tools", "context-engineering", "workflow-automation",
-         "developer-tools", "ai-automation", "harness-engineering",
-         "browser-automation", "local-llm", "ai-workflows", "coding-agents"},
-        "AI & Dev Tools",
-    ),
-    (
-        {"horror-film", "horror-movies", "psychological-horror", "analog-horror",
-         "found-footage", "cosmic-horror", "supernatural-horror", "horror-games",
-         "movie-review", "film-review", "movie-recommendation", "thriller",
-         "horror-nostalgia", "horror-content"},
-        "Horror & Film",
-    ),
-    (
-        {"career-coaching", "burnout-recovery", "professional-development",
-         "leadership", "workplace-culture", "management-leadership",
-         "employee-engagement", "toxic-workplace", "executive-education"},
-        "Work & Leadership",
-    ),
-    (
-        {"activism", "surveillance-capitalism", "ai-ethics", "corporate-lobbying",
-         "regulatory-capture", "government-technology", "digital-rights",
-         "content-moderation", "deepfake", "ai-satire", "privatization"},
-        "Politics & Society",
-    ),
-    (
-        {"relationships", "personal-growth", "self-care", "philosophy",
-         "self-love", "existentialism", "communication-skills",
-         "emotional-intelligence", "heartbreak", "dating-advice"},
-        "Personal Growth",
-    ),
-    (
-        {"3d-printing", "self-hosting", "open-source", "single-board-computer",
-         "home-lab", "video-codec", "web-development", "right-to-repair",
-         "iphone-customization", "open-source-hardware"},
-        "Tech & Hardware",
-    ),
-    (
-        {"home-cleaning", "desk-organization", "phone-accessories",
-         "interior-design", "room-divider", "fashion-trends", "workspace-setup",
-         "sustainable-products"},
-        "Products & Home",
-    ),
-]
-
-# Content-type fallback for entries with no matching tags.
-CONTENT_TYPE_FALLBACK_MAP = {
-    "podcast": "News & Current Events",
-    "audio": "News & Current Events",
-    "image": "Images",
-}
-
 WEEKLY_LOG_TEMPLATE = """---
 title: "Weekly Links — {week_label}"
 created: {created}
@@ -999,21 +934,6 @@ tags:
 ## Other
 """
 
-
-def categorize_from_tags(
-    tags: list[str],
-    content_type: str = "web_page",
-) -> str:
-    """Determine a topic category from a note's tags.
-
-    Checks tags against TAG_CATEGORY_RULES in priority order.
-    Falls back to content-type mapping, then "Other".
-    """
-    tag_set = set(tags)
-    for rule_tags, category in TAG_CATEGORY_RULES:
-        if tag_set & rule_tags:
-            return category
-    return CONTENT_TYPE_FALLBACK_MAP.get(content_type, "Other")
 
 
 def _categorize_via_llm(
