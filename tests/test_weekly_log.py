@@ -355,12 +355,12 @@ def test_categorize_via_llm_picks_existing_section():
     assert result["reclassify"] == []
 
 
-def test_categorize_via_llm_falls_back_on_api_error():
-    """Any API failure returns the safe fallback dict."""
+def test_categorize_via_llm_falls_back_on_network_error():
+    """Network error returns the safe fallback dict."""
     existing_sections = {"Other": []}
 
     with patch("pipeline.summarizer.get_secret", return_value="fake-key"), \
-         patch("urllib.request.urlopen", side_effect=Exception("connection refused")):
+         patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
         result = _categorize_via_llm(
             title="Some Article",
             url="https://example.com/article",

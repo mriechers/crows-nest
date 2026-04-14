@@ -1029,16 +1029,38 @@ Rules:
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            logger.error(
+                "LLM categorization auth failed (HTTP %d) — check OPENROUTER_API_KEY: %s",
+                exc.code, exc,
+            )
+        elif exc.code == 429:
+            logger.warning("LLM categorization rate-limited (HTTP 429), using fallback")
+        else:
+            logger.warning("LLM categorization HTTP error %d: %s", exc.code, exc)
+        return fallback
+    except (urllib.error.URLError, OSError) as exc:
+        logger.warning("LLM categorization network error (non-fatal): %s", exc)
+        return fallback
 
+    try:
         response = json.loads(raw)
         assistant_text = response["choices"][0]["message"]["content"]
-    except Exception as exc:
-        logger.warning("LLM categorization API call failed (non-fatal): %s", exc)
+    except (json.JSONDecodeError, KeyError, IndexError) as exc:
+        logger.warning(
+            "LLM categorization: unexpected response format: %s — raw: %.300s",
+            exc, raw,
+        )
         return fallback
 
     parsed = _extract_json(assistant_text)
     if parsed is None or "category" not in parsed:
-        logger.warning("LLM categorization returned unparseable response, using fallback")
+        logger.warning(
+            "LLM categorization returned unparseable response, using fallback — "
+            "response preview: %.200s",
+            assistant_text or "(empty)",
+        )
         return fallback
 
     category = parsed.get("category", "Other")
@@ -1120,6 +1142,9 @@ def _reclassify_entries(
                 break
 
         if removed_line is None:
+            logger.debug(
+                "reclassify: could not find entry [[%s]] in weekly log, skipping", title
+            )
             continue
 
         # Find the target section header
