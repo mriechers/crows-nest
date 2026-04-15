@@ -33,6 +33,7 @@ try:
     from pipeline.db import (
         add_feed as _db_add_feed,
         get_connection as _db_get_connection,
+        get_pipeline_status as _db_get_pipeline_status,
         get_top_articles as _db_get_top_articles,
         list_feeds as _db_list_feeds,
         mark_articles_surfaced as _db_mark_articles_surfaced,
@@ -269,6 +270,43 @@ def manage_feeds(
             conn.close()
 
     return {"error": f"Unknown action '{action}'. Use 'list', 'add', or 'stats'."}
+
+
+# ---------------------------------------------------------------------------
+# Pipeline tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def pipeline_queue(recent_limit: int = 20) -> dict:
+    """Return the current state of the content preservation pipeline.
+
+    Shows items waiting to be processed (pending/processing/error) and
+    recently completed saves. Use this to monitor the Signal-to-Obsidian
+    pipeline health.
+
+    Args:
+        recent_limit: Maximum number of recent completions to include (default 20).
+    """
+    if not _RSS_AVAILABLE:
+        return {"error": "Pipeline db unavailable — pipeline deps not installed"}
+    return _db_get_pipeline_status(recent_limit=recent_limit, db_path=_DB_PATH)
+
+
+@mcp.tool()
+def pipeline_retry(link_id: int) -> dict:
+    """Reset an errored pipeline item back to pending for reprocessing.
+
+    Args:
+        link_id: ID of the link to retry.
+    """
+    if not _RSS_AVAILABLE:
+        return {"error": "Pipeline db unavailable"}
+    from pipeline.db import claim_link
+    success = claim_link(link_id, from_status="error", to_status="pending", db_path=_DB_PATH)
+    if success:
+        return {"retried": True, "link_id": link_id}
+    return {"retried": False, "error": f"Link {link_id} not in error state"}
 
 
 # ---------------------------------------------------------------------------
