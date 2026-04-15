@@ -1,20 +1,29 @@
-"""Tests for the mcp_knowledge.server module.
+"""Tests for the mcp_knowledge MCP adapter and knowledge tools.
 
-Checks tool/resource registration and the shape of tool return values.
+Checks tool registration and the shape of tool return values.
 """
 
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
 
-# Import the server module — this registers all tools and resources on `mcp`.
-from mcp_knowledge import server as server_mod
-from mcp_knowledge import knowledge as knowledge_mod
+# Ensure the project root is on sys.path so pipeline imports resolve (or fail
+# gracefully) the same way they do at runtime.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-mcp = server_mod.mcp
+from mcp_knowledge import knowledge as knowledge_mod
+from mcp_knowledge.mcp_adapter import (
+    _get_server_info,
+    _list_topics,
+    _search_knowledge,
+    create_mcp_server,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -50,34 +59,30 @@ def knowledge_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 class TestToolRegistration:
     def test_all_tools_registered(self) -> None:
-        tools = asyncio.run(mcp.list_tools())
-        tool_names = {t.name for t in tools}
+        from mcp.types import ListToolsRequest
+
+        server = create_mcp_server()
+        handler = server.request_handlers[ListToolsRequest]
+        req = ListToolsRequest(method="tools/list", params=None)
+        result = asyncio.run(handler(req))
+        # ServerResult is a root-model union; unwrap via .root
+        tool_names = {t.name for t in result.root.tools}
         expected = {
-            "search_knowledge", "list_topics", "get_document", "get_server_info",
-            "list_recent_articles", "search_articles", "mark_surfaced",
-            "manage_feeds", "list_all_articles", "pipeline_queue", "pipeline_retry",
+            "search_knowledge",
+            "list_topics",
+            "get_document",
+            "get_server_info",
+            "list_recent_articles",
+            "search_articles",
+            "mark_surfaced",
+            "manage_feeds",
+            "list_all_articles",
+            "pipeline_queue",
+            "pipeline_retry",
         }
         assert expected == tool_names, (
             f"Expected tools {expected}, got {tool_names}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Resource registration
-# ---------------------------------------------------------------------------
-
-
-class TestResourceRegistration:
-    def test_static_resources_registered(self) -> None:
-        resources = asyncio.run(mcp.list_resources())
-        uris = {str(r.uri) for r in resources}
-        assert "knowledge://sources" in uris
-        assert "knowledge://documents" in uris
-
-    def test_template_resource_registered(self) -> None:
-        templates = asyncio.run(mcp.list_resource_templates())
-        uri_templates = {t.uriTemplate for t in templates}
-        assert "knowledge://document/{path}" in uri_templates
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +92,7 @@ class TestResourceRegistration:
 
 class TestGetServerInfo:
     def test_returns_expected_keys(self, knowledge_root: Path) -> None:
-        result = server_mod.get_server_info()
+        result = _get_server_info()
         assert isinstance(result, dict)
         required_keys = {"name", "description", "document_count", "categories", "last_refreshed"}
         assert required_keys == set(result.keys()), (
@@ -99,7 +104,7 @@ class TestGetServerInfo:
         make_doc(k_dir, "guides/a.md", "# A\n\ncontent\n")
         make_doc(k_dir, "guides/b.md", "# B\n\ncontent\n")
 
-        result = server_mod.get_server_info()
+        result = _get_server_info()
         assert result["document_count"] == 2
 
     def test_categories_list(self, knowledge_root: Path) -> None:
@@ -107,11 +112,11 @@ class TestGetServerInfo:
         make_doc(k_dir, "guides/a.md", "# A\n\ncontent\n")
         make_doc(k_dir, "policies/b.md", "# B\n\ncontent\n")
 
-        result = server_mod.get_server_info()
+        result = _get_server_info()
         assert sorted(result["categories"]) == ["guides", "policies"]
 
     def test_name_and_description_present(self, knowledge_root: Path) -> None:
-        result = server_mod.get_server_info()
+        result = _get_server_info()
         assert isinstance(result["name"], str) and result["name"]
         assert isinstance(result["description"], str) and result["description"]
 
@@ -126,7 +131,7 @@ class TestListTopics:
         k_dir = knowledge_root / "knowledge"
         make_doc(k_dir, "guides/doc.md", "# Guide\n\ncontent\n")
 
-        result = server_mod.list_topics()
+        result = _list_topics()
         assert isinstance(result, list)
 
     def test_each_item_has_required_keys(self, knowledge_root: Path) -> None:
@@ -135,7 +140,7 @@ class TestListTopics:
         make_doc(k_dir, "guides/doc2.md", "# G2\n\ncontent\n")
         make_doc(k_dir, "policies/pol.md", "# P\n\ncontent\n")
 
-        result = server_mod.list_topics()
+        result = _list_topics()
         assert len(result) == 2  # "guides" and "policies"
 
         for item in result:
@@ -148,46 +153,7 @@ class TestListTopics:
         make_doc(k_dir, "guides/b.md", "# B\n\ncontent\n")
         make_doc(k_dir, "policies/p.md", "# P\n\ncontent\n")
 
-        result = server_mod.list_topics()
+        result = _list_topics()
         counts = {item["category"]: item["document_count"] for item in result}
         assert counts["guides"] == 2
         assert counts["policies"] == 1
-
-
-# ---------------------------------------------------------------------------
-# Transport selection
-# ---------------------------------------------------------------------------
-
-
-class TestTransportSelection:
-    def test_main_accepts_sse_arg(self, monkeypatch):
-        """main() should pass transport arg to mcp.run()."""
-        captured = {}
-        def mock_run(transport="stdio", **kwargs):
-            captured["transport"] = transport
-        monkeypatch.setattr(server_mod.mcp, "run", mock_run)
-        monkeypatch.setattr("sys.argv", ["server", "sse"])
-        server_mod.main()
-        assert captured["transport"] == "sse"
-
-    def test_main_defaults_to_config_transport(self, monkeypatch):
-        """main() should use config.MCP_TRANSPORT when no CLI arg."""
-        captured = {}
-        def mock_run(transport="stdio", **kwargs):
-            captured["transport"] = transport
-        monkeypatch.setattr(server_mod.mcp, "run", mock_run)
-        monkeypatch.setattr("sys.argv", ["server"])
-        monkeypatch.setattr(server_mod.config, "MCP_TRANSPORT", "stdio")
-        server_mod.main()
-        assert captured["transport"] == "stdio"
-
-    def test_main_cli_arg_overrides_config(self, monkeypatch):
-        """CLI arg should override config.MCP_TRANSPORT."""
-        captured = {}
-        def mock_run(transport="stdio", **kwargs):
-            captured["transport"] = transport
-        monkeypatch.setattr(server_mod.mcp, "run", mock_run)
-        monkeypatch.setattr("sys.argv", ["server", "sse"])
-        monkeypatch.setattr(server_mod.config, "MCP_TRANSPORT", "stdio")
-        server_mod.main()
-        assert captured["transport"] == "sse"

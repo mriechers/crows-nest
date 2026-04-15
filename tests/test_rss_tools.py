@@ -8,7 +8,7 @@ import pytest
 from datetime import datetime, timezone
 
 from pipeline.db import init_db, add_feed, add_article, get_connection
-from mcp_knowledge import server as server_mod
+import mcp_knowledge.mcp_adapter as server_mod
 
 
 @pytest.fixture()
@@ -79,7 +79,7 @@ def rss_db(tmp_path, monkeypatch):
 
 class TestListAllArticles:
     def test_returns_all_articles_default(self, rss_db):
-        result = server_mod.list_all_articles()
+        result = server_mod._list_all_articles()
         assert "articles" in result
         assert "total" in result
         assert "limit" in result
@@ -88,49 +88,49 @@ class TestListAllArticles:
         assert len(result["articles"]) == 7
 
     def test_articles_have_expected_keys(self, rss_db):
-        result = server_mod.list_all_articles()
+        result = server_mod._list_all_articles()
         article = result["articles"][0]
         required = {"id", "title", "url", "summary", "score", "published_at",
                     "surfaced", "feed_title", "feed_url", "tier"}
         assert required.issubset(set(article.keys()))
 
     def test_filter_by_feed_url(self, rss_db):
-        result = server_mod.list_all_articles(feed_url="https://example.com/feed.xml")
+        result = server_mod._list_all_articles(feed_url="https://example.com/feed.xml")
         assert result["total"] == 5
         assert len(result["articles"]) == 5
         for article in result["articles"]:
             assert article["feed_url"] == "https://example.com/feed.xml"
 
     def test_filter_by_surfaced_false(self, rss_db):
-        result = server_mod.list_all_articles(surfaced=False)
+        result = server_mod._list_all_articles(surfaced=False)
         assert result["total"] == 5  # 3 from feed1 + 2 from feed2
         assert len(result["articles"]) == 5
         for article in result["articles"]:
             assert article["surfaced"] == 0
 
     def test_filter_by_surfaced_true(self, rss_db):
-        result = server_mod.list_all_articles(surfaced=True)
+        result = server_mod._list_all_articles(surfaced=True)
         assert result["total"] == 2  # 2 surfaced from feed1
         assert len(result["articles"]) == 2
         for article in result["articles"]:
             assert article["surfaced"] == 1
 
     def test_filter_by_feed_url_and_surfaced(self, rss_db):
-        result = server_mod.list_all_articles(
+        result = server_mod._list_all_articles(
             feed_url="https://example.com/feed.xml",
             surfaced=False,
         )
         assert result["total"] == 3
 
     def test_pagination_limit(self, rss_db):
-        result = server_mod.list_all_articles(limit=3)
+        result = server_mod._list_all_articles(limit=3)
         assert result["total"] == 7
         assert len(result["articles"]) == 3
         assert result["limit"] == 3
 
     def test_pagination_offset(self, rss_db):
-        result_page1 = server_mod.list_all_articles(limit=4, offset=0)
-        result_page2 = server_mod.list_all_articles(limit=4, offset=4)
+        result_page1 = server_mod._list_all_articles(limit=4, offset=0)
+        result_page2 = server_mod._list_all_articles(limit=4, offset=4)
         ids_page1 = {a["id"] for a in result_page1["articles"]}
         ids_page2 = {a["id"] for a in result_page2["articles"]}
         # Pages must not overlap
@@ -140,7 +140,7 @@ class TestListAllArticles:
 
     def test_returns_error_when_rss_unavailable(self, monkeypatch):
         monkeypatch.setattr(server_mod, "_RSS_AVAILABLE", False)
-        result = server_mod.list_all_articles()
+        result = server_mod._list_all_articles()
         assert "error" in result
 
 
@@ -151,20 +151,20 @@ class TestListAllArticles:
 
 class TestManageFeedsDeactivate:
     def test_deactivate_existing_feed(self, rss_db):
-        result = server_mod.manage_feeds(
+        result = server_mod._manage_feeds(
             action="deactivate",
             url="https://example.com/feed.xml",
         )
         assert result == {"deactivated": True, "url": "https://example.com/feed.xml"}
 
     def test_deactivated_feed_excluded_from_list(self, rss_db):
-        server_mod.manage_feeds(action="deactivate", url="https://example.com/feed.xml")
-        feeds = server_mod.manage_feeds(action="list")
+        server_mod._manage_feeds(action="deactivate", url="https://example.com/feed.xml")
+        feeds = server_mod._manage_feeds(action="list")
         urls = [f["url"] for f in feeds]
         assert "https://example.com/feed.xml" not in urls
 
     def test_deactivate_unknown_feed_returns_error(self, rss_db):
-        result = server_mod.manage_feeds(
+        result = server_mod._manage_feeds(
             action="deactivate",
             url="https://nonexistent.com/feed.xml",
         )
@@ -172,13 +172,13 @@ class TestManageFeedsDeactivate:
         assert "nonexistent" in result["error"]
 
     def test_deactivate_without_url_returns_error(self, rss_db):
-        result = server_mod.manage_feeds(action="deactivate")
+        result = server_mod._manage_feeds(action="deactivate")
         assert "error" in result
         assert "url is required" in result["error"]
 
     def test_deactivate_returns_error_when_rss_unavailable(self, monkeypatch):
         monkeypatch.setattr(server_mod, "_RSS_AVAILABLE", False)
-        result = server_mod.manage_feeds(
+        result = server_mod._manage_feeds(
             action="deactivate",
             url="https://example.com/feed.xml",
         )
