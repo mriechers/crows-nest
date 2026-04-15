@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 24px; min-width: 360px; }
+  h1 { font-size: 16px; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: #aaa; margin-bottom: 6px; }
+  input[type="password"] { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #333; background: #0f3460; color: #e0e0e0; font-family: monospace; font-size: 13px; margin-bottom: 16px; }
+  input:focus { outline: none; border-color: #e94560; }
+  button { padding: 8px 20px; border: none; border-radius: 6px; background: #e94560; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+  button:hover { background: #c73650; }
+  .status { font-size: 12px; margin-top: 8px; color: #2ecc71; min-height: 18px; }
+</style>
+</head>
+<body>
+  <h1>Crow's Nest Settings</h1>
+  <label for="token">Ingest API Token</label>
+  <input type="password" id="token" placeholder="Paste your CROWS_NEST_INGEST_TOKEN">
+  <button id="save-btn">Save</button>
+  <div class="status" id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>
