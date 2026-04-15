@@ -394,6 +394,48 @@ def mark_articles_surfaced(
         conn.close()
 
 
+def get_pipeline_status(
+    recent_limit: int = 20,
+    db_path: str = DB_PATH,
+) -> dict:
+    """Return pipeline queue status: non-done items, recent completions, and counts."""
+    conn = get_connection(db_path)
+    try:
+        # Queue: all non-done items
+        queue_rows = conn.execute(
+            """SELECT id, url, source_type, sender, context, content_type, status,
+                      created_at, updated_at, error, retry_count
+               FROM links
+               WHERE status != 'done'
+               ORDER BY created_at ASC""",
+        ).fetchall()
+
+        # Recent completions
+        recent_rows = conn.execute(
+            """SELECT id, url, source_type, sender, content_type, status,
+                      created_at, updated_at, obsidian_note_path, share_url
+               FROM links
+               WHERE status = 'done'
+               ORDER BY updated_at DESC
+               LIMIT ?""",
+            (recent_limit,),
+        ).fetchall()
+
+        # Counts by status
+        count_rows = conn.execute(
+            "SELECT status, COUNT(*) as count FROM links GROUP BY status"
+        ).fetchall()
+        counts = {row["status"]: row["count"] for row in count_rows}
+
+        return {
+            "queue": [dict(r) for r in queue_rows],
+            "recent": [dict(r) for r in recent_rows],
+            "counts": counts,
+        }
+    finally:
+        conn.close()
+
+
 def expire_old_articles(
     max_age_days: int = 14,
     db_path: str = DB_PATH,

@@ -33,6 +33,7 @@ try:
     from pipeline.db import (
         add_feed as _db_add_feed,
         get_connection as _db_get_connection,
+        get_pipeline_status as _db_get_pipeline_status,
         get_top_articles as _db_get_top_articles,
         list_feeds as _db_list_feeds,
         mark_articles_surfaced as _db_mark_articles_surfaced,
@@ -224,9 +225,10 @@ def manage_feeds(
       - "list": Return all active feeds with metadata.
       - "add": Add a new feed. Requires url. tier defaults to 2 if omitted.
       - "stats": Return feed and article counts from the database.
+      - "deactivate": Disable a feed by URL (sets active=0). Requires url.
 
     Args:
-        action: One of "list", "add", or "stats".
+        action: One of "list", "add", "stats", or "deactivate".
         url: Feed URL (required for "add").
         title: Human-readable feed title (optional for "add").
         tier: Priority tier 1–3 for scoring (optional for "add", default 2).
@@ -268,7 +270,117 @@ def manage_feeds(
         finally:
             conn.close()
 
-    return {"error": f"Unknown action '{action}'. Use 'list', 'add', or 'stats'."}
+    if action == "deactivate":
+        if not url:
+            return {"error": "url is required for action='deactivate'"}
+        conn = _db_get_connection(_DB_PATH)
+        try:
+            cursor = conn.execute(
+                "UPDATE feeds SET active = 0 WHERE url = ?", (url,)
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                return {"error": f"Feed not found: {url}"}
+            return {"deactivated": True, "url": url}
+        finally:
+            conn.close()
+
+    return {"error": f"Unknown action '{action}'. Use 'list', 'add', 'stats', or 'deactivate'."}
+
+
+@mcp.tool()
+def list_all_articles(
+    feed_url: str | None = None,
+    surfaced: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """List RSS articles with optional filtering by feed and surfaced status.
+
+    Returns articles ordered by published date (newest first) with pagination.
+
+    Args:
+        feed_url: Filter to articles from this feed URL only.
+        surfaced: Filter by surfaced status (True/False). None = all.
+        limit: Maximum articles to return (default 50).
+        offset: Skip this many articles for pagination (default 0).
+    """
+    if not _RSS_AVAILABLE:
+        return {"error": "RSS db unavailable"}
+    conn = _db_get_connection(_DB_PATH)
+    try:
+        conditions = []
+        params: list = []
+
+        if feed_url:
+            conditions.append("f.url = ?")
+            params.append(feed_url)
+        if surfaced is not None:
+            conditions.append("a.surfaced = ?")
+            params.append(1 if surfaced else 0)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        # Get total count
+        count_sql = f"SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id {where}"
+        total = conn.execute(count_sql, params).fetchone()[0]
+
+        # Get page of articles
+        sql = f"""SELECT a.id, a.title, a.url, a.summary, a.score, a.published_at,
+                         a.surfaced, f.title AS feed_title, f.url AS feed_url, f.tier
+                  FROM articles a
+                  JOIN feeds f ON a.feed_id = f.id
+                  {where}
+                  ORDER BY a.published_at DESC
+                  LIMIT ? OFFSET ?"""
+        params.extend([limit, offset])
+        rows = conn.execute(sql, params).fetchall()
+
+        return {
+            "articles": [dict(r) for r in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def pipeline_queue(recent_limit: int = 20) -> dict:
+    """Return the current state of the content preservation pipeline.
+
+    Shows items waiting to be processed (pending/processing/error) and
+    recently completed saves. Use this to monitor the Signal-to-Obsidian
+    pipeline health.
+
+    Args:
+        recent_limit: Maximum number of recent completions to include (default 20).
+    """
+    if not _RSS_AVAILABLE:
+        return {"error": "Pipeline db unavailable — pipeline deps not installed"}
+    return _db_get_pipeline_status(recent_limit=recent_limit, db_path=_DB_PATH)
+
+
+@mcp.tool()
+def pipeline_retry(link_id: int) -> dict:
+    """Reset an errored pipeline item back to pending for reprocessing.
+
+    Args:
+        link_id: ID of the link to retry.
+    """
+    if not _RSS_AVAILABLE:
+        return {"error": "Pipeline db unavailable"}
+    from pipeline.db import claim_link
+    success = claim_link(link_id, from_status="error", to_status="pending", db_path=_DB_PATH)
+    if success:
+        return {"retried": True, "link_id": link_id}
+    return {"retried": False, "error": f"Link {link_id} not in error state"}
 
 
 # ---------------------------------------------------------------------------
