@@ -225,9 +225,10 @@ def manage_feeds(
       - "list": Return all active feeds with metadata.
       - "add": Add a new feed. Requires url. tier defaults to 2 if omitted.
       - "stats": Return feed and article counts from the database.
+      - "deactivate": Disable a feed by URL (sets active=0). Requires url.
 
     Args:
-        action: One of "list", "add", or "stats".
+        action: One of "list", "add", "stats", or "deactivate".
         url: Feed URL (required for "add").
         title: Human-readable feed title (optional for "add").
         tier: Priority tier 1–3 for scoring (optional for "add", default 2).
@@ -269,7 +270,80 @@ def manage_feeds(
         finally:
             conn.close()
 
-    return {"error": f"Unknown action '{action}'. Use 'list', 'add', or 'stats'."}
+    if action == "deactivate":
+        if not url:
+            return {"error": "url is required for action='deactivate'"}
+        conn = _db_get_connection(_DB_PATH)
+        try:
+            cursor = conn.execute(
+                "UPDATE feeds SET active = 0 WHERE url = ?", (url,)
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                return {"error": f"Feed not found: {url}"}
+            return {"deactivated": True, "url": url}
+        finally:
+            conn.close()
+
+    return {"error": f"Unknown action '{action}'. Use 'list', 'add', 'stats', or 'deactivate'."}
+
+
+@mcp.tool()
+def list_all_articles(
+    feed_url: str | None = None,
+    surfaced: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """List RSS articles with optional filtering by feed and surfaced status.
+
+    Returns articles ordered by published date (newest first) with pagination.
+
+    Args:
+        feed_url: Filter to articles from this feed URL only.
+        surfaced: Filter by surfaced status (True/False). None = all.
+        limit: Maximum articles to return (default 50).
+        offset: Skip this many articles for pagination (default 0).
+    """
+    if not _RSS_AVAILABLE:
+        return {"error": "RSS db unavailable"}
+    conn = _db_get_connection(_DB_PATH)
+    try:
+        conditions = []
+        params: list = []
+
+        if feed_url:
+            conditions.append("f.url = ?")
+            params.append(feed_url)
+        if surfaced is not None:
+            conditions.append("a.surfaced = ?")
+            params.append(1 if surfaced else 0)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        # Get total count
+        count_sql = f"SELECT COUNT(*) FROM articles a JOIN feeds f ON a.feed_id = f.id {where}"
+        total = conn.execute(count_sql, params).fetchone()[0]
+
+        # Get page of articles
+        sql = f"""SELECT a.id, a.title, a.url, a.summary, a.score, a.published_at,
+                         a.surfaced, f.title AS feed_title, f.url AS feed_url, f.tier
+                  FROM articles a
+                  JOIN feeds f ON a.feed_id = f.id
+                  {where}
+                  ORDER BY a.published_at DESC
+                  LIMIT ? OFFSET ?"""
+        params.extend([limit, offset])
+        rows = conn.execute(sql, params).fetchall()
+
+        return {
+            "articles": [dict(r) for r in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

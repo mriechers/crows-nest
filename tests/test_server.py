@@ -55,7 +55,7 @@ class TestToolRegistration:
         expected = {
             "search_knowledge", "list_topics", "get_document", "get_server_info",
             "list_recent_articles", "search_articles", "mark_surfaced",
-            "manage_feeds",
+            "manage_feeds", "list_all_articles", "pipeline_queue", "pipeline_retry",
         }
         assert expected == tool_names, (
             f"Expected tools {expected}, got {tool_names}"
