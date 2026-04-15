@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crow's Nest Bookmarklet</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .card { background: #16213e; border-radius: 12px; padding: 2rem; max-width: 480px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  h1 { font-size: 1.4rem; margin-bottom: 0.5rem; color: #e0e0e0; }
+  .subtitle { color: #888; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.4rem; }
+  input[type="password"] { width: 100%; padding: 0.6rem 0.8rem; border-radius: 6px; border: 1px solid #333; background: #0f3460; color: #e0e0e0; font-family: monospace; font-size: 0.9rem; margin-bottom: 1rem; }
+  input:focus { outline: none; border-color: #e94560; }
+  .bookmarklet-area { text-align: center; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #333; }
+  .bookmarklet-link { display: inline-block; padding: 0.7rem 1.5rem; background: #e94560; color: #fff; font-weight: 600; font-size: 0.95rem; border-radius: 8px; text-decoration: none; cursor: grab; transition: background 0.2s; }
+  .bookmarklet-link:hover { background: #c73650; }
+  .bookmarklet-link.disabled { background: #444; cursor: not-allowed; pointer-events: none; }
+  .hint { font-size: 0.8rem; color: #888; margin-top: 0.8rem; }
+  .hint code { background: #0f3460; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.8rem; }
+  .step { display: flex; gap: 0.6rem; margin-bottom: 0.8rem; align-items: flex-start; }
+  .step-num { background: #e94560; color: #fff; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .step-text { font-size: 0.85rem; color: #ccc; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Save to Crow's Nest</h1>
+  <p class="subtitle">Bookmarklet installer — queue any page to the pipeline</p>
+
+  <label for="token">Ingest API Token</label>
+  <input type="password" id="token" placeholder="Paste your CROWS_NEST_INGEST_TOKEN" autocomplete="off">
+
+  <div class="step"><span class="step-num">1</span><span class="step-text">Paste your ingest token above</span></div>
+  <div class="step"><span class="step-num">2</span><span class="step-text">Drag the button below to your bookmarks bar</span></div>
+  <div class="step"><span class="step-num">3</span><span class="step-text">Click it on any page to save to the pipeline</span></div>
+
+  <div class="bookmarklet-area">
+    <a id="bookmarklet" class="bookmarklet-link disabled" href="#">Save to Crow's Nest</a>
+    <p class="hint">Your token is embedded in the bookmark — not sent anywhere except <code>share.bymarkriechers.com</code></p>
+  </div>
+</div>
+
+<script>
+const tokenInput = document.getElementById('token');
+const bookmarkletLink = document.getElementById('bookmarklet');
+
+function buildBookmarklet(token) {
+  // The bookmarklet code, minified
+  const code = `
+(function(){
+  var t='${token}';
+  var u=location.href;
+  var n=document.createElement('div');
+  n.style.cssText='position:fixed;top:16px;right:16px;z-index:2147483647;padding:12px 20px;border-radius:8px;font:14px/1.4 -apple-system,sans-serif;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,0.3);transition:opacity 0.3s;';
+  n.style.background='#e94560';
+  n.textContent='Saving...';
+  document.body.appendChild(n);
+  fetch('https://share.bymarkriechers.com/api/ingest',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+t},
+    body:JSON.stringify({url:u,source:'bookmarklet'})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d.error){n.style.background='#c73650';n.textContent='Error: '+d.error;}
+    else{n.style.background='#2ecc71';n.textContent='Queued (#'+d.id+')';}
+    setTimeout(function(){n.style.opacity='0';setTimeout(function(){n.remove()},300)},2000);
+  }).catch(function(e){
+    n.style.background='#c73650';n.textContent='Failed: '+e.message;
+    setTimeout(function(){n.style.opacity='0';setTimeout(function(){n.remove()},300)},3000);
+  });
+})();`.replace(/\n\s*/g, '');
+
+  return 'javascript:' + encodeURIComponent(code);
+}
+
+tokenInput.addEventListener('input', function() {
+  const token = this.value.trim();
+  if (token.length > 0) {
+    bookmarkletLink.href = buildBookmarklet(token);
+    bookmarkletLink.classList.remove('disabled');
+  } else {
+    bookmarkletLink.href = '#';
+    bookmarkletLink.classList.add('disabled');
+  }
+});
+
+// Prevent clicking — it should only be dragged
+bookmarkletLink.addEventListener('click', function(e) {
+  e.preventDefault();
+  if (!this.classList.contains('disabled')) {
+    alert('Drag this button to your bookmarks bar to install it.');
+  }
+});
+</script>
+</body>
+</html>

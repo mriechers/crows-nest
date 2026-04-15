@@ -2,9 +2,21 @@
 // Accepts URLs from iOS Shortcuts, browser extensions, etc.
 // Writes to D1 queue; local poller drains into pipeline DB.
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // CORS preflight for /api/ingest (bookmarklet support)
+    if (url.pathname === "/api/ingest" && request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
 
     if (url.pathname === "/api/health" && request.method === "GET") {
       return Response.json({ status: "ok", service: "crows-nest-ingest" });
@@ -53,27 +65,32 @@ function authenticate(request, env) {
   return token && token === env.INGEST_TOKEN;
 }
 
+function corsJson(data, init = {}) {
+  const status = init.status || 200;
+  return Response.json(data, { status, headers: CORS_HEADERS });
+}
+
 async function handleIngest(request, env) {
   if (!authenticate(request, env)) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
+    return corsJson({ error: "unauthorized" }, { status: 401 });
   }
 
   let body;
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: "invalid JSON" }, { status: 400 });
+    return corsJson({ error: "invalid JSON" }, { status: 400 });
   }
 
   const linkUrl = (body.url || "").trim();
   if (!linkUrl) {
-    return Response.json({ error: "url is required" }, { status: 400 });
+    return corsJson({ error: "url is required" }, { status: 400 });
   }
 
   try {
     new URL(linkUrl);
   } catch {
-    return Response.json({ error: "invalid url" }, { status: 400 });
+    return corsJson({ error: "invalid url" }, { status: 400 });
   }
 
   const context = (body.context || "").trim() || null;
@@ -87,14 +104,14 @@ async function handleIngest(request, env) {
       .bind(linkUrl, context, source, now)
       .run();
 
-    return Response.json({
+    return corsJson({
       id: result.meta.last_row_id,
       status: "queued",
       url: linkUrl,
     });
   } catch (err) {
     console.error("queue insert failed:", err.message);
-    return Response.json(
+    return corsJson(
       { error: "queue insert failed" },
       { status: 500 }
     );
