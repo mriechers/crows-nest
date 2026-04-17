@@ -41,8 +41,8 @@ def db_path(tmp_path):
             ("https://youtube.com/watch?v=abc", "signal", "Mark", "youtube", "pending", now, now, None),
             ("https://example.com/article", "signal", "Mark", "article", "processing", now, now, None),
             ("https://broken.com/page", "signal", "Mark", "article", "error", now, now, "timeout"),
-            ("https://done.com/video", "signal", "Mark", "youtube", "done", now, now, None),
-            ("https://done2.com/article", "signal", "Mark", "article", "done", now, now, None),
+            ("https://done.com/video", "signal", "Mark", "youtube", "archived", now, now, None),
+            ("https://done2.com/article", "signal", "Mark", "article", "archived", now, now, None),
         ],
     )
     conn.commit()
@@ -62,14 +62,14 @@ def test_queue_excludes_done(db_path):
     from pipeline.db import get_pipeline_status
     result = get_pipeline_status(db_path=db_path)
     statuses = {item["status"] for item in result["queue"]}
-    assert "done" not in statuses
+    assert "archived" not in statuses
     assert len(result["queue"]) == 3  # pending + processing + error
 
 
 def test_recent_only_done(db_path):
     from pipeline.db import get_pipeline_status
     result = get_pipeline_status(db_path=db_path)
-    assert all(item["status"] == "done" for item in result["recent"])
+    assert all(item["status"] == "archived" for item in result["recent"])
     assert len(result["recent"]) == 2
 
 
@@ -79,7 +79,7 @@ def test_counts_correct(db_path):
     assert result["counts"]["pending"] == 1
     assert result["counts"]["processing"] == 1
     assert result["counts"]["error"] == 1
-    assert result["counts"]["done"] == 2
+    assert result["counts"]["archived"] == 2
 
 
 def test_recent_limit(db_path):

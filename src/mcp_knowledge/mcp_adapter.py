@@ -10,7 +10,14 @@ import json
 import logging
 
 from mcp.server import Server
-from mcp.types import TextContent, Tool
+from mcp.types import (
+    ReadResourceResult,
+    Resource,
+    ResourceTemplate,
+    TextContent,
+    TextResourceContents,
+    Tool,
+)
 
 from . import config, knowledge
 
@@ -477,6 +484,61 @@ _TOOLS: list[Tool] = [
 def create_mcp_server() -> Server:
     """Build and return the crows-nest MCP Server."""
     server = Server("crows-nest")
+
+    # ------------------------------------------------------------------
+    # Resources
+    # ------------------------------------------------------------------
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        return [
+            Resource(
+                uri="knowledge://sources",
+                name="Knowledge sources",
+                description="The sources.json manifest — lists all knowledge source documents and metadata.",
+                mimeType="application/json",
+            ),
+            Resource(
+                uri="knowledge://documents",
+                name="Document list",
+                description="All available document paths, one per line.",
+                mimeType="text/plain",
+            ),
+        ]
+
+    @server.list_resource_templates()
+    async def list_resource_templates() -> list[ResourceTemplate]:
+        return [
+            ResourceTemplate(
+                uriTemplate="knowledge://document/{path}",
+                name="Knowledge document",
+                description="Read a specific knowledge document by its relative path.",
+                mimeType="text/plain",
+            ),
+        ]
+
+    @server.read_resource()
+    async def read_resource(uri) -> ReadResourceResult:
+        uri_str = str(uri)
+
+        if uri_str == "knowledge://sources":
+            text = json.dumps(knowledge.load_sources(), indent=2)
+        elif uri_str == "knowledge://documents":
+            text = "\n".join(knowledge.list_documents())
+        elif uri_str.startswith("knowledge://document/"):
+            path = uri_str[len("knowledge://document/"):]
+            content = knowledge.get_document(path)
+            text = content if content is not None else f"Document not found: {path}"
+        else:
+            text = f"Unknown resource: {uri_str}"
+
+        return ReadResourceResult(
+            contents=[TextResourceContents(uri=uri_str, text=text, mimeType="text/plain")]
+        )
+
+    # ------------------------------------------------------------------
+    # Tools
+    # ------------------------------------------------------------------
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
