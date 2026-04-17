@@ -26,10 +26,32 @@ logger = setup_logging("crows-nest.processor")
 
 SUPPORTED_IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"}
 
+# Domains that require browser impersonation to bypass bot detection.
+# yt-dlp supports this via curl_cffi; passing --impersonate "" lets yt-dlp
+# choose any available impersonation target.  Requires curl_cffi to be
+# installed in yt-dlp's Python environment (see docs/SETUP.md).
+_IMPERSONATE_DOMAINS = ("tiktok.com",)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _yt_dlp_impersonate_flags(url: str) -> list[str]:
+    """Return yt-dlp impersonation flags for domains that require it.
+
+    Returns ["--impersonate", ""] for TikTok (and similar bot-protected sites),
+    or an empty list for all other URLs.
+    """
+    try:
+        hostname = urllib.parse.urlparse(url).hostname or ""
+    except Exception:
+        return []
+    if any(hostname.endswith(d) for d in _IMPERSONATE_DOMAINS):
+        return ["--impersonate", ""]
+    return []
+
 
 def _find_transcript(media_dir: str) -> str | None:
     """Walk media_dir tree and return the first .txt file found."""
@@ -782,6 +804,7 @@ def _try_fetch_subtitles(url: str, media_dir: str, link_id: int) -> str | None:
             [
                 "yt-dlp", "--write-sub", "--sub-lang", "en",
                 "--skip-download", "--sub-format", "vtt",
+                *_yt_dlp_impersonate_flags(url),
                 "--output", vtt_output, url,
             ],
             capture_output=True, text=True, timeout=60,
@@ -806,6 +829,7 @@ def _try_fetch_subtitles(url: str, media_dir: str, link_id: int) -> str | None:
                 [
                     "yt-dlp", "--write-auto-sub", "--sub-lang", "en",
                     "--skip-download", "--sub-format", "vtt",
+                    *_yt_dlp_impersonate_flags(url),
                     "--output", vtt_output, url,
                 ],
                 capture_output=True, text=True, timeout=60,
@@ -858,7 +882,7 @@ def process_video(
     yt_metadata = {}
     try:
         meta_result = subprocess.run(
-            ["yt-dlp", "--dump-json", "--no-download", url],
+            ["yt-dlp", "--dump-json", "--no-download", *_yt_dlp_impersonate_flags(url), url],
             capture_output=True, text=True, timeout=60,
         )
         if meta_result.returncode == 0:
@@ -926,6 +950,7 @@ def process_video(
                     "yt-dlp",
                     "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                     "--merge-output-format", "mp4",
+                    *_yt_dlp_impersonate_flags(url),
                     "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
                     url,
                 ],
@@ -968,6 +993,7 @@ def process_video(
                     "yt-dlp",
                     "--extract-audio",
                     "--audio-format", "m4a",
+                    *_yt_dlp_impersonate_flags(url),
                     "--output", os.path.join(media_dir, "%(title)s.%(ext)s"),
                     url,
                 ],
