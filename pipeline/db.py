@@ -398,24 +398,24 @@ def get_pipeline_status(
     recent_limit: int = 20,
     db_path: str = DB_PATH,
 ) -> dict:
-    """Return pipeline queue status: non-done items, recent completions, and counts."""
+    """Return pipeline queue status: in-progress items, recent completions, and counts."""
     conn = get_connection(db_path)
     try:
-        # Queue: all non-done items
+        # Queue: items still in progress (not archived or failed)
         queue_rows = conn.execute(
             """SELECT id, url, source_type, sender, context, content_type, status,
                       created_at, updated_at, error, retry_count
                FROM links
-               WHERE status != 'done'
+               WHERE status NOT IN ('archived', 'failed')
                ORDER BY created_at ASC""",
         ).fetchall()
 
-        # Recent completions
+        # Recent completions (archived items)
         recent_rows = conn.execute(
             """SELECT id, url, source_type, sender, content_type, status,
                       created_at, updated_at, obsidian_note_path, share_url
                FROM links
-               WHERE status = 'done'
+               WHERE status = 'archived'
                ORDER BY updated_at DESC
                LIMIT ?""",
             (recent_limit,),

@@ -24,6 +24,7 @@ from mcp_knowledge.mcp_adapter import (
     _search_knowledge,
     create_mcp_server,
 )
+from mcp.types import ListResourcesRequest, ListResourceTemplatesRequest
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +84,30 @@ class TestToolRegistration:
         assert expected == tool_names, (
             f"Expected tools {expected}, got {tool_names}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Resource registration
+# ---------------------------------------------------------------------------
+
+
+class TestResourceRegistration:
+    def test_static_resources_registered(self) -> None:
+        server = create_mcp_server()
+        handler = server.request_handlers[ListResourcesRequest]
+        req = ListResourcesRequest(method="resources/list", params=None)
+        result = asyncio.run(handler(req))
+        uris = {str(r.uri) for r in result.root.resources}
+        assert "knowledge://sources" in uris
+        assert "knowledge://documents" in uris
+
+    def test_template_resource_registered(self) -> None:
+        server = create_mcp_server()
+        handler = server.request_handlers[ListResourceTemplatesRequest]
+        req = ListResourceTemplatesRequest(method="resources/templates/list", params=None)
+        result = asyncio.run(handler(req))
+        uri_templates = {t.uriTemplate for t in result.root.resourceTemplates}
+        assert "knowledge://document/{path}" in uri_templates
 
 
 # ---------------------------------------------------------------------------
