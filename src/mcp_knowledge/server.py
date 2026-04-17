@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -416,8 +417,15 @@ def get_knowledge_document(path: str) -> str:
 
 
 def main() -> None:
-    # Transport: CLI arg > config > default (stdio)
-    transport = sys.argv[1] if len(sys.argv) > 1 else config.MCP_TRANSPORT
+    # Transport priority: env var > CLI arg > config fallback (default: stdio)
+    env_transport = os.environ.get("MCP_TRANSPORT")
+    cli_transport = sys.argv[1] if len(sys.argv) > 1 else None
+    transport = cli_transport or env_transport or config.MCP_TRANSPORT
+    valid_transports = {"streamable-http", "sse", "stdio"}
+    if transport not in valid_transports:
+        raise ValueError(
+            f"Invalid transport {transport!r}. Must be one of: {', '.join(sorted(valid_transports))}"
+        )
     logger.info("Starting MCP server with transport=%s", transport)
     mcp.run(transport=transport)
 

@@ -8,8 +8,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 # FORK: Change these to describe your specific knowledge domain.
-SERVER_NAME = "my-knowledge-server"
-SERVER_DESCRIPTION = "Expert knowledge about [your domain]"
+SERVER_NAME = "crows-nest"
+SERVER_DESCRIPTION = "Knowledge base and RSS pipeline for Second Brain"
 
 # ---------------------------------------------------------------------------
 # Paths
