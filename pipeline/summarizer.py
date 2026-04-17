@@ -67,7 +67,7 @@ def build_frontmatter(
 
     Always includes para: inbox and tags starting with 'all'.
     Includes via/sender only when sender is provided.
-    Includes platform and creator from metadata when available.
+    Includes creator from metadata when available.
     """
     metadata = metadata or {}
     type_tag = CONTENT_TYPE_TAG_MAP.get(content_type, "web-clip")
@@ -89,8 +89,6 @@ def build_frontmatter(
         f"intake: {intake}",
     ]
 
-    if metadata.get("platform"):
-        lines.append(f"platform: {metadata['platform']}")
     if metadata.get("creator"):
         safe_creator = metadata['creator'].replace('"', '\\"')
         lines.append(f'creator: "{safe_creator}"')
@@ -190,7 +188,6 @@ def generate_note_content(
         sections.append(f"## Follow-Up Ideas\n\n{followup_lines}")
 
     # --- Bibliographic Source Details ---
-    platform = metadata.get("platform") or ""
     creator = metadata.get("creator") or ""
     creator_url = metadata.get("creator_url") or ""
     description = metadata.get("description") or ""
@@ -217,9 +214,6 @@ def generate_note_content(
             source_lines.append(f"- **Creator**: [{creator}]({creator_url})")
         else:
             source_lines.append(f"- **Creator**: {creator}")
-
-    if platform:
-        source_lines.append(f"- **Platform**: {platform}")
 
     if content_type == "image":
         image_count = metadata.get("image_count") or len(metadata.get("vault_filenames", []))
