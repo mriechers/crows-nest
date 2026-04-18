@@ -26,18 +26,21 @@ def create_scheduler() -> Scheduler:
         "ingest-poll",
         cmd("ingest_poller.py"),
         interval_seconds=300,
+        run_at_startup=True,
         cwd=cwd,
     )
     scheduler.register_subprocess(
         "obsidian-scan",
         cmd("obsidian_scanner.py"),
         interval_seconds=300,
+        run_at_startup=True,
         cwd=cwd,
     )
     scheduler.register_subprocess(
         "process",
         cmd("processor.py", "--drain"),
         interval_seconds=1800,
+        run_at_startup=True,
         cwd=cwd,
     )
     scheduler.register_subprocess(
@@ -50,6 +53,7 @@ def create_scheduler() -> Scheduler:
         "summarize",
         cmd("summarizer.py", "--drain"),
         interval_seconds=2 * 3600,
+        run_at_startup=True,
         cwd=cwd,
     )
     scheduler.register_subprocess(
