@@ -1,3 +1,5 @@
+import { serveSavePage, serveManifest, serveServiceWorker } from "./pwa.js";
+
 // Ingest endpoint for the Crow's Nest pipeline.
 // Accepts URLs from iOS Shortcuts, browser extensions, etc.
 // Writes to D1 queue; local poller drains into pipeline DB.
@@ -52,6 +54,20 @@ export default {
 
     if (url.pathname === "/api/nodes/heartbeat" && request.method === "POST") {
       return handleHeartbeat(request, env);
+    }
+
+    // --- PWA share target ---
+
+    if (url.pathname === "/save" && request.method === "GET") {
+      return serveSavePage();
+    }
+
+    if (url.pathname === "/manifest.json" && request.method === "GET") {
+      return serveManifest();
+    }
+
+    if (url.pathname === "/sw.js" && request.method === "GET") {
+      return serveServiceWorker();
     }
 
     // Everything else: not handled by this Worker (falls through to R2)
